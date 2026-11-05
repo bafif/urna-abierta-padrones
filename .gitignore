@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+dist/
+
+# Los padrones reales y lo que se extrae de ellos nunca entran al repo.
+*.pdf
+*.padron
+*.jsonl
+/privado/
