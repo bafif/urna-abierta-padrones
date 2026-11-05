@@ -10,8 +10,9 @@ local by default, and no roll ever goes through an account or a server of the pr
 
 ## Status
 
-First stage. Today it reads scanned rolls laid out as tables and measures the quality of what it extracts; the common
-output format comes in the next stage.
+It reads scanned rolls laid out as tables, measures the quality of what it extracts and builds the `.padron` file that
+gets uploaded to Urna Abierta. The file follows an [open format](docs/padron-format.md), public domain. For now it runs from a
+terminal.
 
 ## Usage
 
@@ -21,6 +22,7 @@ You need [uv](https://docs.astral.sh/uv/). The first run downloads the reading m
 uv sync
 uv run urna-padrones extract roll.pdf --out ~/private/roll.jsonl
 uv run urna-padrones report ~/private/roll.jsonl
+uv run urna-padrones padron ~/private/roll.jsonl --out ~/private/my-roll.padron
 uv run urna-padrones crosscheck ~/private/other.jsonl ~/private/roll.jsonl
 ```
 

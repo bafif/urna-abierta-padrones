@@ -9,6 +9,7 @@ from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 from . import quality
+from .padron import write_padron
 from .pdf import page_count
 from .table import COLUMNS, build_vocabulary, extract_file_page, infer_orders, smooth_by_neighbours
 
@@ -50,6 +51,15 @@ def extract(args: argparse.Namespace) -> int:
     return 0
 
 
+def to_padron(args: argparse.Namespace) -> int:
+    if inside_git_repo(args.out) and not args.allow_inside_repo:
+        print("El padrón tiene datos personales y queda dentro de un repo de git: elegí otra carpeta.", file=sys.stderr)
+        return 2
+    summary = write_padron(quality.load_records(args.records), args.out, args.title)
+    print(f"{summary['people']} personas; {summary['to_review']} para revisar")
+    return 0
+
+
 def show_report(args: argparse.Namespace) -> int:
     print(json.dumps(quality.report(quality.load_records(args.records)), ensure_ascii=False, indent=1))
     return 0
@@ -71,6 +81,12 @@ def main() -> int:
     command.add_argument("--workers", type=int, default=2)
     command.add_argument("--allow-inside-repo", action="store_true")
     command.set_defaults(run=extract)
+    command = commands.add_parser("padron", help="arma el archivo .padron que se sube a Urna Abierta")
+    command.add_argument("records", type=Path)
+    command.add_argument("--out", type=Path, required=True)
+    command.add_argument("--title")
+    command.add_argument("--allow-inside-repo", action="store_true")
+    command.set_defaults(run=to_padron)
     command = commands.add_parser("report", help="muestra la calidad de una extracción")
     command.add_argument("records", type=Path)
     command.set_defaults(run=show_report)

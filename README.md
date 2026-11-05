@@ -10,8 +10,8 @@ local por defecto, y ningún padrón pasa por una cuenta ni un servidor del proy
 
 ## Estado
 
-Primera etapa. Hoy lee padrones escaneados en forma de tabla y mide la calidad de lo que extrae; el formato común de
-salida viene en la próxima etapa.
+Lee padrones escaneados en forma de tabla, mide la calidad de lo que extrae y arma el archivo `.padron` que se sube a Urna
+Abierta. El archivo sigue un [formato abierto](docs/formato-padron.md), de dominio público. Por ahora se usa desde una terminal.
 
 ## Uso
 
@@ -21,6 +21,7 @@ Hace falta [uv](https://docs.astral.sh/uv/). La primera vez baja el modelo de le
 uv sync
 uv run urna-padrones extract padron.pdf --out ~/privado/padron.jsonl
 uv run urna-padrones report ~/privado/padron.jsonl
+uv run urna-padrones padron ~/privado/padron.jsonl --out ~/privado/mi-padron.padron
 uv run urna-padrones crosscheck ~/privado/otro.jsonl ~/privado/padron.jsonl
 ```
 
