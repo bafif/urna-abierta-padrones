@@ -23,6 +23,7 @@ import onnxruntime
 import rapidocr
 from rapidocr import RapidOCR
 from rapidocr.utils.download_file import DownloadFile
+from rapidocr.utils.process_img import ResizeImgError
 
 # The Windows builds can also report usage events to the system.
 if hasattr(onnxruntime, "disable_telemetry_events"):
@@ -107,9 +108,16 @@ def tight_crop(image: np.ndarray, margin: int = 3) -> np.ndarray:
 
 
 def read_cell(image: np.ndarray) -> tuple[str, float]:
-    """Return the text of a grayscale image holding a single line, and how sure the model is."""
+    """Return the text of a grayscale image holding a single line, and how sure the model is.
+
+    An image the model cannot bring to its size, such as a speck far wider than high on a page that is not a
+    table, has no text.
+    """
     framed = cv2.copyMakeBorder(tight_crop(image), 3, 3, 3, 3, cv2.BORDER_CONSTANT, value=255)
-    result = _get_engine()(cv2.cvtColor(framed, cv2.COLOR_GRAY2BGR), use_det=False, use_cls=False, use_rec=True)
+    try:
+        result = _get_engine()(cv2.cvtColor(framed, cv2.COLOR_GRAY2BGR), use_det=False, use_cls=False, use_rec=True)
+    except ResizeImgError:
+        return "", 0.0
     if not result.txts:
         return "", 0.0
     return " ".join(result.txts), float(min(result.scores))

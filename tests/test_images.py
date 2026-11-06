@@ -1,5 +1,8 @@
 """Rolls as pictures, made up here: scans saved as JPEG, PNG or TIFF, and a phone photo."""
 
+import struct
+import zlib
+
 import cv2
 import numpy as np
 import pytest
@@ -7,8 +10,9 @@ import pytest
 from fake_layouts import draw_ruled_page, people, photo_of, save_image
 from fake_roll import PAGE_SIZE, draw_page, fake_rows, find_font
 from urna_padrones import cli
+from urna_padrones import pages as pages_module
 from urna_padrones.fields import fold
-from urna_padrones.pages import LONG_SIDE, check_roll, kind_of, render
+from urna_padrones.pages import LONG_SIDE, PNG, check_roll, kind_of, render
 from urna_padrones.reading import RollError, read_roll, row_image
 
 ROWS = 20
@@ -79,6 +83,56 @@ def test_a_damaged_picture_says_so(tmp_path):
 def test_a_picture_without_a_table_is_not_a_roll(tmp_path):
     path = tmp_path / "blanca.png"
     save_image([np.full((3508, 2480), 250, np.uint8)], path, "png")
+    with pytest.raises(RollError) as raised:
+        read_roll(path)
+    assert raised.value.code == "unknown_layout"
+
+
+def png_chunk(kind: bytes, data: bytes) -> bytes:
+    return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
+
+
+def test_a_picture_with_too_many_pixels_is_refused_before_opening_it(tmp_path):
+    """A few hundred bytes may say 40000 by 40000 pixels: opening that would take gigabytes."""
+    png = tmp_path / "enorme.png"
+    header = struct.pack(">IIBBBBB", 40000, 40000, 8, 0, 0, 0, 0)
+    png.write_bytes(PNG + png_chunk(b"IHDR", header) + png_chunk(b"IDAT", zlib.compress(b"\x00" * 100)) + png_chunk(b"IEND", b""))
+    jpeg = tmp_path / "enorme.jpg"
+    save_image([np.full((100, 80), 250, np.uint8)], jpeg, "jpeg")
+    data = bytearray(jpeg.read_bytes())
+    frame = data.index(b"\xff\xc0")
+    data[frame + 5 : frame + 9] = struct.pack(">HH", 20000, 20000)
+    jpeg.write_bytes(bytes(data))
+    for path in (png, jpeg):
+        with pytest.raises(RollError) as raised:
+            check_roll(path)
+        assert raised.value.code == "too_many_pixels"
+    assert "120 millones" in raised.value.message
+
+
+def test_the_size_of_each_page_comes_from_the_first_bytes(tmp_path):
+    path = tmp_path / "dos.tif"
+    save_image([np.full((300, 200), 250, np.uint8), np.full((120, 90), 250, np.uint8)], path, "tiff")
+    assert check_roll(path) == 2
+    assert pages_module._sizes(path.read_bytes()) == [(200, 300), (90, 120)]
+
+
+def test_a_png_with_a_transparent_background_is_read_on_white_paper(tmp_path, font):
+    """ImageMagick turns a PDF into a PNG with ink on transparent paper, which would otherwise read as black."""
+    page = draw_page(fake_rows(10, seed=45, accents=font[1]), angle=0.3, font=font[0])
+    rgba = np.dstack([np.zeros_like(page)] * 3 + [255 - page])
+    path = tmp_path / "transparente.png"
+    assert cv2.imwrite(str(path), rgba)
+    shown = render(path, 0)
+    assert shown.shape == page.shape
+    assert float(np.abs(shown.astype(int) - page.astype(int)).mean()) < 2
+
+
+def test_a_picture_that_is_not_a_table_is_not_a_roll(tmp_path):
+    """Noise, as in a photo of something else, has specks the model cannot bring to its size: they read as nothing."""
+    noise = (np.random.default_rng(1).random((1400, 1000)) * 255).astype(np.uint8)
+    path = tmp_path / "ruido.jpg"
+    save_image([noise], path, "jpeg")
     with pytest.raises(RollError) as raised:
         read_roll(path)
     assert raised.value.code == "unknown_layout"

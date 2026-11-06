@@ -10,6 +10,12 @@ MESSAGES = {
         "The PDF is password protected: save it without a password and try again.",
     ),
     "damaged": ("El archivo está dañado y no se puede abrir.", "The file is damaged and cannot be opened."),
+    "too_many_pixels": (
+        "La imagen es demasiado grande para abrirla: puede tener hasta 120 millones de píxeles. Achicala, o escaneá la "
+        "hoja a 300 dpi.",
+        "The picture is too large to open: it can have up to 120 million pixels. Make it smaller, or scan the page at "
+        "300 dpi.",
+    ),
     "empty": ("El PDF no tiene páginas.", "The PDF has no pages."),
     "unknown_layout": (
         "No encontré en ninguna página una tabla de padrón que sepa leer.",
