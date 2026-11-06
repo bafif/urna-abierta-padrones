@@ -71,10 +71,12 @@ ANSWER_KEYS = {
 }
 PROMPT = """This image is one page of an electoral roll (padrón) from Argentina. List every person on it.
 Answer only with JSON, with no other text, in this shape:
-{"rows": [{"order": "...", "name": "...", "document": "...", "legajo": "...", "program": "...", "status": "...",
-"table": "...", "address": "..."}]}
-One object per person, in the order of the page. Copy each value exactly as it is printed, without correcting,
-completing or guessing anything. Use null for a value the page does not have or that cannot be read.
+{"columns": ["order", "name", ...], "rows": [{"order": "...", "name": "...", "document": "...", "legajo": "...",
+"program": "...", "status": "...", "table": "...", "address": "..."}]}
+"columns" lists, with the keys below, every value the page has a column for (for table, also a title), even when
+it cannot be read on some or all of the rows. One object per person, in the order of the page. Copy each value
+exactly as it is printed, without correcting, completing or guessing anything. Use null for a value the page
+does not have or that cannot be read.
 - order: the order number (Nº, Orden).
 - name: the full name as printed (Apellido y nombre). If the family name and the given names are in two
   columns, write "Family, Given".
@@ -85,7 +87,7 @@ completing or guessing anything. Use null for a value the page does not have or 
 - table: the voting table (Mesa) of the person, from its column or from a title such as "Mesa 12" above the list.
 - address: the address (Domicilio, Dirección).
 Leave out headers, titles, totals, signatures and anything that is not a person. If the page lists nobody,
-answer {"rows": []}."""
+answer {"columns": [], "rows": []}."""
 
 
 class AIError(Exception):
@@ -518,10 +520,20 @@ def _chat_page(answer: dict) -> AIPage:
 
 
 def answer_table(parsed) -> AITable:
-    """The people a chat service listed, checked: {"rows": [...]}, each an object with text, numbers or null."""
+    """The people a chat service listed, checked: {"columns": [...], "rows": [...]}, each row an object with text,
+    numbers or null.
+
+    A value is checked on every row when the page has it: when "columns" names it, or when any row has it. Null
+    is both a value the page has not got and one that cannot be read, so a column read as null on every row is
+    still checked when "columns" names it, and its blank cells are reviewed.
+    """
     rows = parsed.get("rows") if isinstance(parsed, dict) else None
     if not isinstance(rows, list):
         raise _Malformed("falta la lista «rows»")
+    # A page that lists nobody has no columns to check.
+    named = parsed.get("columns", None if rows else [])
+    if not isinstance(named, list) or not all(isinstance(name, str) for name in named):
+        raise _Malformed("falta la lista «columns»")
     if len(rows) > MAX_ROWS:
         raise _Malformed(f"trae más de {MAX_ROWS} personas en una página")
     people = []
@@ -538,7 +550,12 @@ def answer_table(parsed) -> AITable:
             person[key] = str(value).strip()
         people.append(person)
     # Every roll has names: a person without one is reviewed. Any other value is checked only where the page has it.
-    keys = tuple(key for key in ANSWER_KEYS.values() if key == "name" or any(person.get(key) for person in people))
+    listed = {ANSWER_KEYS[name] for name in named if name in ANSWER_KEYS}
+    keys = tuple(
+        key
+        for key in ANSWER_KEYS.values()
+        if key == "name" or key in listed or any(person.get(key) for person in people)
+    )
     return AITable([[person.get(key, "") for key in keys] for person in people], keys=keys)
 
 

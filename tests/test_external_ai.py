@@ -40,6 +40,7 @@ MARKDOWN_NEXT = """| 4 | Muestra, Tomás | 99.000.004 | Calle Modelo 7 |
 | 5 | Peña, Sofía | 99.000.005 | Avenida de Prueba 900 |
 """
 CHAT_ROWS = {
+    "columns": ["order", "name", "document", "legajo", "program", "status", "table"],
     "rows": [
         {"order": 1, "name": "Prueba, Ana", "document": "99.000.011", "legajo": "12345", "program": "Ingeniería Civil",
          "status": "A", "table": "Mesa 3", "address": None},
@@ -195,7 +196,8 @@ def test_a_service_that_refuses_json_mode_is_asked_again_without_it(fake, tmp_pa
 
 @pytest.mark.parametrize("kind, body", [
     ("chat", chat_answer("Acá está el padrón: Prueba, Ana, 99.000.011")),
-    ("chat", chat_answer(json.dumps({"rows": [{"name": ["Prueba", "Ana"]}]}))),
+    ("chat", chat_answer(json.dumps({"columns": ["name"], "rows": [{"name": ["Prueba", "Ana"]}]}))),
+    ("chat", chat_answer(json.dumps({"rows": [{"name": "Prueba, Ana"}]}))),
     ("chat", chat_answer('{"rows": [{"name": "Prueba, Ana"', finish="length")),
     ("mistral", answer(b"<html>no es JSON</html>")),
 ])
@@ -378,3 +380,17 @@ def test_a_service_on_this_computer_is_reached_without_the_proxy(fake, tmp_path,
     reading = read_roll(scan(tmp_path), service=MistralOCR(KEY, f"http://localhost:{port}"))
     assert len(reading.rows) == 3
     assert proxy.requests == [] and len(target.requests) == 1
+
+
+def test_a_column_named_by_the_answer_is_checked_even_when_every_row_has_it_null(fake, tmp_path):
+    rows = [{"order": order, "name": name, "document": None, "legajo": f"1234{order}"}
+            for order, name in ((None, "Prueba, Ana"), (None, "Ejemplo, Luis"), (None, "Modelo, Inés"))]
+    service = fake(chat_answer(json.dumps({"columns": ["order", "name", "document", "legajo"], "rows": rows})))
+    reading = read_roll(scan(tmp_path), service=OpenAICompatible(KEY, service.url + "/v1", "m"))
+    assert set(reading.rows[0].columns) == {"order", "name", "document", "file_number"}
+    assert all(row.needs_review and row.valid["document"] is False and row.valid["order"] is False
+               for row in reading.rows)
+    # A page that lists nobody needs no columns; a page with people does.
+    assert external_ai.answer_table({"rows": []}).rows == []
+    with pytest.raises(external_ai._Malformed, match="columns"):
+        external_ai.answer_table({"rows": rows})
