@@ -108,6 +108,9 @@ class PageReading:
     text_columns: object | None = None
     # Whether the PDF page has text at all, even when it gave no rows.
     has_text: bool = False
+    # Whether the page found a header of its own, the faculty's included: such a page is never read again with
+    # another page's header.
+    own_header: bool = False
 
 
 def select_separators(columns: list[int]) -> list[int] | None:
@@ -358,7 +361,7 @@ def read_page(
         mesa = title_table(clean, grid.rows[0][0], checkpoint)
         for row in rows:
             row.title_table = mesa
-    return PageReading(rows, header=found, separators=len(grid.columns))
+    return PageReading(rows, header=found, separators=len(grid.columns), own_header=own is not None)
 
 
 def extract_page(gray: np.ndarray, page: int, checkpoint: Callable[[], None] | None = None) -> list[Row]:

@@ -233,7 +233,8 @@ def _reread_without_header(
 
     A roll often prints its header only on the first page. A page with text takes the columns of the
     first page with text that named them; a scanned page takes the first header of a table with as many
-    columns. A roll read as the faculty's layout has no header to give, and is not read again.
+    columns. A roll read as the faculty's layout has no header to give. A page that found a header of its own,
+    the faculty's too, is not read again: one PDF may hold two lists laid out differently.
     """
 
     def checkpoint() -> None:
@@ -246,7 +247,7 @@ def _reread_without_header(
         if page.header is not None:
             headers.setdefault(page.separators, page.header)
     for index, page in enumerate(per_page):
-        if page.header is not None or page.text_columns is not None:
+        if page.header is not None or page.text_columns is not None or page.own_header:
             continue
         if page.has_text and text_columns is not None:
             checkpoint()

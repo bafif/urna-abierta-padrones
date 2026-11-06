@@ -109,3 +109,24 @@ def test_a_page_without_a_header_takes_the_header_of_another_page(tmp_path):
     names = sum(fold(r.values["name"] or "") == fold(p["name"]) for r, p in zip(reading.rows, rows))
     assert share(names, len(rows)) >= 0.9
     assert share(sum(r.values["document"] == p["document"] for r, p in zip(reading.rows, rows)), len(rows)) >= 0.95
+
+
+def test_a_faculty_page_keeps_its_own_header_next_to_a_list_laid_out_otherwise(tmp_path):
+    """One PDF may hold two lists: a page with another header and as many columns lends it only to pages without one."""
+    font, accents = find_font()
+    other = people(12, seed=12, accents=accents)
+    headers = ["Orden", "DNI", "Apellido y nombre", "Legajo", "Carrera", "Domicilio", "Firma"]
+    keys = ["order", "document", "name", "file_number", "program", "address", ""]
+    column_x = [150, 290, 540, 1060, 1330, 1700, 2150, 2400]
+    faculty_rows = fake_rows(12, seed=5, first_order=21, accents=accents)
+    pages = [draw_ruled_page(other, headers, keys, column_x, font=font), draw_page(faculty_rows, angle=0.4, font=font)]
+    path = tmp_path / "dos-listas.pdf"
+    save_pdf(pages, path)
+    reading = read_roll(path)
+    second = [row for row in reading.rows if row.page == 1]
+    assert len(second) == len(faculty_rows)
+    assert all(row.layout == "facultad" for row in second)
+    documents = sum(r.values["document"] == p["document"] for r, p in zip(second, faculty_rows))
+    assert share(documents, len(second)) >= 0.9
+    names = sum(fold(r.values["name"] or "") == fold(p["name"]) for r, p in zip(second, faculty_rows))
+    assert share(names, len(second)) >= 0.9
