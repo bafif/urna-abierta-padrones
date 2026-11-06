@@ -133,11 +133,12 @@ uv run urna-padrones verify ~/private/roll.jsonl ~/private/spreadsheet.xlsx --fi
 - `crosscheck` compares two rolls that share people. Since their reading errors are independent, it measures quality
   without anyone having to read the data.
 - `verify` compares what was read with the same roll typed into a spreadsheet (`.xlsx` or `.csv`). From the spreadsheet
-  it reads only the name, the document and the student number; other columns are never opened. It says how many people
-  match, how many differ, and whether the reader had marked the ones that differ as sure. It also checks the spreadsheet
-  itself: repeated documents or documents of another length, and student numbers whose check digit does not add up. A
-  difference may be a reading error or a typo: `--filas` also lists the spreadsheet rows to look at and what to look at
-  in each, without showing any data.
+  it reads only the name, the document, the student number and the program; other columns are never opened. It says how
+  many people match, how many differ, and whether the reader had marked the ones that differ as sure. It also checks the
+  spreadsheet itself: repeated documents or documents of another length, and student numbers whose check digit does not
+  add up. A person enrolled in more than one program appears once per program and does not count as a repeated
+  document. A difference may be a reading error or a typo: `--filas` also lists the spreadsheet rows to look at and what
+  to look at in each, without showing any data.
 
 In the faculty's student numbers, the digit after the slash is a check digit (modulo 11, with weights 2 to 7 from the
 right; 10 or 11 is written as 1). The reader flags a four-digit student number that does not match it: it is almost

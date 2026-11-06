@@ -1,4 +1,4 @@
-"""A roll typed into a spreadsheet (.xlsx or .csv), read only for what a roll has: name, document and legajo.
+"""A roll typed into a spreadsheet (.xlsx or .csv), read only for what a roll has: name, document, legajo and program.
 
 It is the reference that `urna-padrones verify` compares a reading against. Any other column (notes, contact data,
 anything a group keeps about people) is never read.
@@ -21,6 +21,7 @@ HEADERS = {
     "given": ("nombres",),
     "document": ("dni", "documento", "nro documento", "n° documento", "n° de documento", "numero de documento"),
     "file_number": ("legajo", "n° de legajo", "nro legajo"),
+    "program": ("carrera", "propuesta"),
 }
 HEADER_SEARCH = 10
 MAX_UNPACKED = 200 * 1024 * 1024
@@ -64,6 +65,7 @@ def _people(rows: list[tuple[int, list[str]]]) -> list[dict]:
                 "name": name,
                 "document": re.sub(r"\D", "", re.sub(r"\.0+$", "", number)),
                 "file_number": re.sub(r"\s", "", cell("file_number")).upper(),
+                "program": cell("program"),
             }
         )
     return people
@@ -134,7 +136,7 @@ def _csv_rows(path: Path) -> list[tuple[int, list[str]]]:
 
 
 def read_reference(path: Path) -> list[dict]:
-    """The people of a spreadsheet roll, each with the row where it is, its name, document and legajo."""
+    """The people of a spreadsheet roll, each with the row where it is, its name, document, legajo and program."""
     suffix = path.suffix.lower()
     if suffix == ".xlsx":
         rows = _xlsx_rows(path)

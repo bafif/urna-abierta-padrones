@@ -191,30 +191,83 @@ def _similar(a: str, b: str) -> bool:
     return a == b or SequenceMatcher(None, a, b).ratio() >= 0.85
 
 
+def _key_program(program: str | None) -> str:
+    """A program as rows are compared: without case, accents or marks, keeping digits ("Plan 2010" is not "Plan 2023")."""
+    return "".join(c for c in fold(program or "") if c.isalnum())
+
+
+def _key_person(name: str | None) -> str:
+    """A name as two rows of one person are compared: its words in any order, without case, accents or marks."""
+    return " ".join(sorted(_key_name(name).split()))
+
+
+SAME_PERSON = "misma persona en más de una carrera"
+
+
+def _repeated(group: list[dict], other_name: str, by_file: bool) -> tuple[str, list[dict], bool]:
+    """Rows that share a document or a legajo: one person in more than one program, or something to check.
+
+    A student enrolled in two or three programs is in the roll once per program, with the same name, and votes
+    once. It is the same person only when the name is the same (case, marks and word order aside): Juan and Juana
+    with one document are two people, one of them with a document typed wrong. Returns what to say, the rows to say
+    it about, and whether the group holds one person in more than one program.
+    """
+    names = {_key_person(p["name"]) for p in group}
+    if len(names) > 1 or not next(iter(names)):
+        return other_name, group, False
+    if by_file and len({p["document"] for p in group if p["document"]}) > 1:
+        # The same legajo and name with two documents: one of the documents is wrong.
+        return "legajo repetido con otro DNI", group, False
+    keys = [_key_program(p.get("program")) for p in group]
+    programs = Counter(keys)
+    # Without a program, or with the same one, there is no telling the rows apart: the person was typed twice.
+    twice = group if "" in programs else [p for p, key in zip(group, keys) if programs[key] > 1]
+    return "fila repetida", twice, len(programs.keys() - {""}) > 1
+
+
 def _reference_checks(reference: list[dict]) -> tuple[dict, dict[int, list[str]]]:
     """What is odd in the spreadsheet itself, as counts and as the rows to look at."""
     rows: dict[int, list[str]] = {}
-    documents = Counter(p["document"] for p in reference if p["document"])
-    file_numbers = Counter(p["file_number"] for p in reference if p["file_number"])
-    counts = Counter()
+
+    def note(person: dict, what: str) -> None:
+        found = rows.setdefault(person["row"], [])
+        if what not in found:
+            found.append(what)
+
+    by_document: dict[str, list[dict]] = {}
+    by_file: dict[str, list[dict]] = {}
     for person in reference:
-        found = []
         if not person["document"]:
-            found.append("sin DNI")
+            note(person, "sin DNI")
         elif not DOCUMENT.match(person["document"]):
-            found.append("el DNI no tiene 7 u 8 números")
-        elif documents[person["document"]] > 1:
-            found.append("DNI repetido en la planilla")
+            note(person, "el DNI no tiene 7 u 8 números")
+        else:
+            by_document.setdefault(person["document"], []).append(person)
         if person["file_number"]:
             if not FILE_NUMBER.match(person["file_number"]):
-                found.append("el legajo no tiene la forma A-1234/3")
+                note(person, "el legajo no tiene la forma A-1234/3")
             elif not file_number_adds_up(person["file_number"]):
-                found.append("el dígito del legajo no corresponde")
-            if file_numbers[person["file_number"]] > 1:
-                found.append("legajo repetido en la planilla")
-        counts.update(found)
-        if found:
-            rows[person["row"]] = found
+                note(person, "el dígito del legajo no corresponde")
+            by_file.setdefault(person["file_number"], []).append(person)
+    in_programs = 0
+    counted: set[int] = set()  # rows already counted as one person in more than one program
+    for groups, other_name in (
+        (by_document, "DNI repetido con otro nombre"),
+        (by_file, "legajo repetido con otro nombre"),
+    ):
+        for group in groups.values():
+            if len(group) < 2:
+                continue
+            what, to_check, one_person = _repeated(group, other_name, groups is by_file)
+            for person in to_check:
+                note(person, what)
+            if one_person:
+                group_rows = {p["row"] for p in group}
+                in_programs += not group_rows & counted
+                counted |= group_rows
+    counts = Counter(what for found in rows.values() for what in found)
+    if in_programs:
+        counts[SAME_PERSON] = in_programs
     return dict(counts), rows
 
 
@@ -222,8 +275,9 @@ def verify(records: list[dict], reference: list[dict]) -> tuple[dict, dict[int, 
     """Compare a reading with a roll typed into a spreadsheet, and say where they differ.
 
     A person of the spreadsheet is matched to a read row when two of document, legajo and name agree, so a
-    difference in any one of them still finds its row. A difference may come from the reading or from the
-    spreadsheet: the figures say how many, never what. Returns the counts and, by spreadsheet row, what to check.
+    difference in any one of them still finds its row; among equally good rows it prefers one not taken yet and then
+    one of the same program. A difference may come from the reading or from the spreadsheet: the figures say how
+    many, never what. Returns the counts and, by spreadsheet row, what to check.
     """
     by_document: dict[str, list[dict]] = {}
     by_file: dict[str, list[dict]] = {}
@@ -243,16 +297,26 @@ def verify(records: list[dict], reference: list[dict]) -> tuple[dict, dict[int, 
     sure_by_field = Counter()
     for person in reference:
         name = _key_name_compact(person["name"])
+        program = _key_program(person.get("program"))
         candidates = by_document.get(person["document"], []) + by_file.get(person["file_number"], []) + by_name.get(name, [])
-        best, best_votes = None, 1
+        best, best_rank = None, None
         for record in candidates:
             votes = (
                 bool(person["document"]) and record.get("document") == person["document"],
                 bool(person["file_number"]) and record.get("file_number") == person["file_number"],
                 _similar(_key_name_compact(record.get("name")), name),
             )
-            if sum(votes) > best_votes:
-                best, best_votes = record, sum(votes)
+            # Someone in two programs is read twice: each row of the spreadsheet takes a read row of its own when it
+            # can, the one of its program if the reading has programs, before the one with more votes. Otherwise
+            # both rows would take the clean read row and a misread in the other would never show. The program is
+            # never a vote: two votes are always needed.
+            rank = (
+                id(record) not in used,
+                bool(program) and _key_program(record.get("program")) == program,
+                sum(votes),
+            )
+            if sum(votes) >= 2 and (best_rank is None or rank > best_rank):
+                best, best_rank = record, rank
         if best is None:
             rows.setdefault(person["row"], []).append("no está en la lectura")
             continue

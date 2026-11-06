@@ -135,9 +135,10 @@ uv run urna-padrones verify ~/privado/padron.jsonl ~/privado/planilla.xlsx --fil
 - `crosscheck` compara dos padrones que comparten gente. Como sus errores de lectura son independientes, sirve para medir
   la calidad sin que nadie tenga que leer los datos.
 - `verify` compara lo leído con el mismo padrón tipeado en una planilla (`.xlsx` o `.csv`). De la planilla lee solo el
-  nombre, el documento y el legajo; las demás columnas no se abren. Dice cuántas personas coinciden, cuántas difieren y
-  si las que difieren el lector las había dado por seguras. También revisa la planilla misma: DNI repetidos o con otro
-  largo, y legajos cuyo dígito verificador no corresponde. Una diferencia puede ser un error de lectura o de tipeo: con
+  nombre, el documento, el legajo y la carrera; las demás columnas no se abren. Dice cuántas personas coinciden, cuántas
+  difieren y si las que difieren el lector las había dado por seguras. También revisa la planilla misma: DNI repetidos o
+  con otro largo, y legajos cuyo dígito verificador no corresponde. Una persona anotada en más de una carrera aparece
+  una vez por carrera y no cuenta como DNI repetido. Una diferencia puede ser un error de lectura o de tipeo: con
   `--filas` lista, además, las filas de la planilla para mirar y qué mirar en cada una, sin mostrar ningún dato.
 
 En los legajos de la facultad, el número después de la barra es un dígito verificador (módulo 11, con pesos de 2 a 7
