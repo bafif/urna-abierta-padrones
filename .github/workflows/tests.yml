@@ -1,0 +1,21 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+
+env:
+  # The Python that uv installs, the version in .python-version, as in the release builds.
+  UV_PYTHON_PREFERENCE: only-managed
+
+jobs:
+  tests:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      # The scans of invented people are drawn with Liberation Sans: without it those tests are skipped.
+      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends fonts-liberation
+      - uses: astral-sh/setup-uv@v6
+      - run: uv python install
+      - run: uv sync --locked
+      - run: uv run pytest

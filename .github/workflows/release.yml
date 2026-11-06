@@ -1,0 +1,117 @@
+# The packaged reader is built here, on GitHub's machines and never on a personal one, so that it
+# carries no paths or machine names. Each file gets a SHA-256 and an attestation.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+env:
+  GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  GH_REPO: ${{ github.repository }}
+  # Every machine builds with the Python that uv installs, the version in .python-version, and
+  # never with one the runner image already has (a Homebrew Python would ask for a newer macOS).
+  UV_PYTHON_PREFERENCE: only-managed
+
+jobs:
+  draft:
+    runs-on: ubuntu-24.04
+    steps:
+      - run: gh release create "$GITHUB_REF_NAME" --draft --generate-notes
+
+  lector:
+    needs: draft
+    strategy:
+      fail-fast: false
+      matrix:
+        # Windows x64, Apple Silicon, Intel Macs and Linux x64. Linux is built on the oldest Ubuntu
+        # still offered; the bundle leaves out its C++ runtime and needs glibc 2.28 (build.py says it).
+        os: [windows-2025, macos-15, macos-15-intel, ubuntu-22.04]
+    runs-on: ${{ matrix.os }}
+    env:
+      URNA_VERSION: ${{ github.ref_name }}
+      URNA_SOURCE_URL: ${{ github.server_url }}/${{ github.repository }}/tree/${{ github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      # With no version given, uv takes it from .python-version.
+      - run: uv python install
+      - run: uv sync --locked --no-editable --no-dev --group build
+      - name: Build
+        run: uv run --no-sync python packaging/build.py
+
+      # The program's own check, with the network cut as far as each runner allows. build.py also
+      # points every proxy at a dead port and fails if anything in the bundle changed. It gives the
+      # program an empty temp folder of its own (TMPDIR, TMP and TEMP) and fails if onnxruntime's
+      # telemetry left its .ses file there.
+      - name: Self test without network (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          if sudo unshare --net -- curl -sS --max-time 5 https://pypi.org -o /dev/null 2>/dev/null; then
+            echo "::warning::a new network namespace still reaches the internet"
+          fi
+          sudo -E unshare --net -- sudo -E -u "$USER" .venv/bin/python packaging/build.py --no-build --self-test
+      - name: Self test without network (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          profile='(version 1)(allow default)(deny network*)'
+          if sandbox-exec -p "$profile" curl -sS --max-time 5 https://pypi.org -o /dev/null 2>/dev/null; then
+            echo "::warning::the sandbox still reaches the internet"
+          fi
+          sandbox-exec -p "$profile" .venv/bin/python packaging/build.py --no-build --self-test
+      - name: Self test without network (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Set-NetFirewallProfile -All -Enabled True
+          $program = (Resolve-Path dist/urna-abierta-lector-windows-x64/urna-abierta-lector.exe).Path
+          $curl = "$env:SystemRoot\System32\curl.exe"
+          New-NetFirewallRule -DisplayName 'lector offline' -Direction Outbound -Action Block -Program $program | Out-Null
+          New-NetFirewallRule -DisplayName 'curl offline' -Direction Outbound -Action Block -Program $curl | Out-Null
+          & $curl -sS --max-time 5 https://pypi.org -o NUL 2>$null
+          if ($LASTEXITCODE -eq 0) { Write-Output "::warning::the firewall does not block a program" }
+          uv run --no-sync python packaging/build.py --no-build --self-test
+
+      # onnxruntime fails to load next to a C++ runtime older than 14.40: the one in the bundle must be new.
+      - name: C++ runtime in the bundle (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $dlls = Get-ChildItem -Recurse -File dist/urna-abierta-lector-windows-x64 -Include msvcp140*.dll, vcruntime140*.dll
+          $dlls | ForEach-Object { '{0} {1}' -f $_.FullName, $_.VersionInfo.FileVersion }
+          if (-not ($dlls | Where-Object Name -eq 'msvcp140.dll')) { Write-Output '::warning::no msvcp140.dll in the bundle' }
+          foreach ($dll in $dlls | Where-Object Name -like 'msvcp140*') {
+            $info = $dll.VersionInfo
+            if ([version]('{0}.{1}' -f $info.FileMajorPart, $info.FileMinorPart) -lt [version]'14.40') {
+              throw "$($dll.FullName) is older than 14.40"
+            }
+          }
+      - name: Signature of the app (macOS)
+        if: runner.os == 'macOS'
+        run: codesign --verify --deep --strict --verbose=2 "dist/Urna Abierta Lector.app"
+
+      - name: Start time
+        run: uv run --no-sync python packaging/build.py --no-build --start-time
+      - id: archive
+        name: Archive
+        run: uv run --no-sync python packaging/build.py --no-build --archive
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: ${{ steps.archive.outputs.archive }}
+      - name: Add it to the release
+        shell: bash
+        env:
+          ARCHIVE: ${{ steps.archive.outputs.archive }}
+          SUMS: ${{ steps.archive.outputs.sums }}
+        run: gh release upload "$GITHUB_REF_NAME" "$ARCHIVE" "$SUMS"
+
+  publish:
+    needs: lector
+    runs-on: ubuntu-24.04
+    steps:
+      - run: gh release edit "$GITHUB_REF_NAME" --draft=false

@@ -9,3 +9,6 @@ dist/
 *.padron
 *.jsonl
 /privado/
+
+# Lo que deja el armado del lector (packaging/build.py).
+/build/
