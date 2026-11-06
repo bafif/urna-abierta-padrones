@@ -10,28 +10,66 @@ local by default, and no roll ever goes through an account or a server of the pr
 
 ## Status
 
-It reads scanned rolls laid out as tables, measures the quality of what it extracts and builds the `.padron` file that
-gets uploaded to Urna Abierta. The file follows an [open format](docs/padron-format.md), public domain. It is used through
-screens in the browser, with no terminal, or from a terminal.
+It reads rolls laid out as tables, from scanned PDFs, PDFs with text and photos, measures the quality of what it
+extracts and builds the `.padron` file that gets uploaded to Urna Abierta. The file follows an
+[open format](docs/padron-format.md), public domain. It is used through screens in the browser, with no terminal, or
+from a terminal.
+
+## What it reads
+
+- **Scanned PDFs and photos of a roll laid out as a ruled table.** It looks for the header in the first rows of the
+  table and reads each column by its name, in any order and even with extra columns. Names are compared without case,
+  accents or dots: «Nº», «N°», «Orden» or «Número» for the order number; «Apellido y nombre», «Nombre», or «Apellido»
+  and «Nombres» in two columns; «DNI», «Documento», «Nro. de documento» or «Tipo y número»; «Legajo»; «Carrera» or
+  «Propuesta»; «Mesa»; «Domicilio»; «Calidad» or «Estado». It needs the name and something that tells people apart: the
+  order number, the document or the student number. A column with another name is not read, even if it has data. A
+  header on two lines, such as «Nro. de» over «documento», is read as one, and a long name may have one letter misread.
+  A page without a header takes the header of another page of the same roll whose table has as many columns.
+- **The faculty's rolls**, whether their header is recognised or not. If it finds no header it knows, it reads the
+  table with the faculty's columns in their order (number, name, program, student number, document, status and
+  signature). If it recognises it and it puts each column where the faculty has it, too. The output is the same as
+  before, byte by byte: a test compares it with a copy of the reading as it was.
+- **PDFs with text**, such as a listing exported from a spreadsheet or a system. It takes the text as it is, without
+  recognising it: it gets no letter wrong, no row is left in doubt because of that, and it reads a page in a fraction of
+  a second. It builds the rows by line and the columns by where the names of the header are, with or without ruling.
+  The header may be on the first page only. Invisible text that some scanners add over the picture is not used: that
+  page is read from its picture, like any scan. One PDF can have pages of both kinds.
+- **Tables (mesas).** With a «Mesa» column, or a title such as «Mesa Nº 12» above the table, each person stays at their
+  table and the `.padron` file has one unit per table. A title applies to the whole page; in a PDF with text, a line
+  saying only «Mesa 13» among the rows starts another table. A page without a title of its own does not take the table
+  of the page before: a misread title cannot send anyone to another table.
+- **Photos** in JPG, PNG or TIFF; a TIFF with several pages is read page by page. Each picture is brought to the size of
+  an A4 page at 300 dpi, taking the page to fill the whole photo. In a phone photo it evens out the light and
+  straightens up to 3 degrees, but it does not correct perspective: it works best with the page flat, well lit, without
+  shadows, taken from straight above and filling the photo.
+
+In rolls other than the faculty's it also takes names without a comma («PRUEBA ANA»), the document type before the
+number («DNI 99.123.456»), student numbers of other shapes (such as 12345 or 12345/6) and any word as a status. Student
+numbers with the faculty's shape still go through their check digit. A row is left for review if a value does not have
+its shape or the model was not sure when reading it; what comes from the text of a PDF, only for the first.
+
+**It does not read yet** handwriting, or tables without a header it recognises and without ruling: a list of names
+without titles, or a scan without lines. Nor does it read with an external AI, with your own key or a free service: that
+is not available yet, everything is read with the local model and the `.padron` file says no external AI saw the data.
 
 ## Without a terminal: the roll reader
 
 The reader opens its screens in the browser and goes step by step, with one question per screen:
 
-1. **Choose the roll:** drag the scanned PDF into the window, or find it on your computer.
+1. **Choose the roll:** drag the PDF or the photo of the roll into the window, or find it on your computer.
 2. **Read it:** the computer reads page by page. It shows which page it is on, how many people it found and roughly how
    long is left. It can be cancelled.
 3. **Review:** it shows the rows that were not clear one at a time, with the image of the row on top and its data below,
    to fix them or say they are fine. The ones you do not review stay pending, to be reviewed later in the app.
 4. **Save:** you get a `.padron` file. In Urna Abierta, go into the election and upload it with “Upload the roll”.
 
-**It is private.** The PDF never leaves your computer, and the reader can only be opened from it, with the address it
-shows when it starts. It keeps a copy of the PDF in a temporary folder only your user can open and deletes it when it
+**It is private.** The file never leaves your computer, and the reader can only be opened from it, with the address it
+shows when it starts. It keeps a copy of the file in a temporary folder only your user can open and deletes it when it
 closes: with “Close the reader”, when its window is closed, or by itself after half an hour without use. If it is cut
 off abruptly, it deletes it the next time it starts. It keeps nothing else. The `.padron` file has people's data: once it is uploaded to the app, delete it.
 
-For now it understands rolls laid out as a ruled table. If the roll is in an Excel or CSV spreadsheet, you do not need
-the reader: upload it straight into the app with “Upload the roll”.
+What it understands is in [What it reads](#what-it-reads). If the roll is in an Excel or CSV spreadsheet, you do not
+need the reader: upload it straight into the app with “Upload the roll”.
 
 From a checkout of this repository it opens with:
 
@@ -126,8 +164,10 @@ uv run urna-padrones crosscheck ~/private/other.jsonl ~/private/roll.jsonl
 uv run urna-padrones verify ~/private/roll.jsonl ~/private/spreadsheet.xlsx --filas
 ```
 
-- `extract` saves the data with permissions for your user only, and refuses to write it inside a git repository. In a
-  terminal it shows which page it is on. `--pages N` reads only the first N pages and `--workers N`, how many at a time.
+- `extract` takes a PDF or a JPG, PNG or TIFF image. It saves the data with permissions for your user only, and refuses
+  to write it inside a git repository. In a terminal it shows which page it is on. `--pages N` reads only the first N
+  pages and `--workers N`, how many at a time. When it ends it says how many rows it read, how many pages had no table
+  and, if there are any, how many it read from their text and how many tables it found.
 - `report`, `crosscheck` and `verify` print counts only, never data about a person. `report` compares with the
   numbering of the roll to warn if anyone is missing.
 - `crosscheck` compares two rolls that share people. Since their reading errors are independent, it measures quality
@@ -150,7 +190,12 @@ always a misread digit.
 uv run pytest
 ```
 
-They use made-up scans with invented people. **Never upload a real roll to the repository.**
+They use made-up scans, PDFs with text and photos with invented people (`tests/fake_roll.py` and
+`tests/fake_layouts.py`). **Never upload a real roll to the repository.**
+
+On GitHub they run on Linux, Windows and macOS (`.github/workflows/tests.yml`). The ones in `tests/test_extract.py` ask
+fontconfig for Liberation Sans and are skipped where it is missing, as on Windows and macOS; the others draw with Arial
+if they cannot find it.
 
 ## How the reader is built
 

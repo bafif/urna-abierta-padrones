@@ -10,29 +10,66 @@ local por defecto, y ningún padrón pasa por una cuenta ni un servidor del proy
 
 ## Estado
 
-Lee padrones escaneados en forma de tabla, mide la calidad de lo que extrae y arma el archivo `.padron` que se sube a Urna
-Abierta. El archivo sigue un [formato abierto](docs/formato-padron.md), de dominio público. Se usa con pantallas en el
-navegador, sin terminal, o desde una terminal.
+Lee padrones en forma de tabla, de PDF escaneados o con texto y de fotos, mide la calidad de lo que extrae y arma el
+archivo `.padron` que se sube a Urna Abierta. El archivo sigue un [formato abierto](docs/formato-padron.md), de dominio
+público. Se usa con pantallas en el navegador, sin terminal, o desde una terminal.
+
+## Qué lee
+
+- **PDF escaneados y fotos de un padrón hecho como tabla con líneas.** Busca el encabezado en las primeras filas de la
+  tabla y lee cada columna por su nombre, en cualquier orden y aunque haya columnas de más. Los nombres se comparan sin
+  mayúsculas, tildes ni puntos: «Nº», «N°», «Orden» o «Número» para el número de orden; «Apellido y nombre», «Nombre», o
+  «Apellido» y «Nombres» en dos columnas; «DNI», «Documento», «Nro. de documento» o «Tipo y número»; «Legajo»;
+  «Carrera» o «Propuesta»; «Mesa»; «Domicilio»; «Calidad» o «Estado». Hace falta el nombre y algo que distinga a las
+  personas: el número de orden, el documento o el legajo. Una columna con otro nombre no se lee, aunque tenga datos. Un
+  encabezado en dos renglones, como «Nro. de» sobre «documento», se lee como uno, y en un nombre largo perdona una letra
+  mal leída. Una página sin encabezado toma el de otra página del mismo padrón cuya tabla tenga tantas columnas.
+- **Los padrones de la facultad**, se reconozca o no su encabezado. Si no encuentra uno que conozca, lee la tabla con
+  las columnas de la facultad en su orden (número, nombre, carrera, legajo, documento, calidad y firma). Si lo reconoce
+  y pone cada columna donde la tiene la facultad, también. La salida es la misma que antes, byte por byte: una prueba
+  la compara con una copia de la lectura de antes.
+- **PDF con texto**, como un listado exportado de una planilla o de un sistema. Toma el texto tal como está, sin
+  reconocerlo: no se equivoca de letra, ninguna fila queda en duda por eso y lee una página en una fracción de segundo.
+  Arma las filas por renglón y las columnas por dónde están los nombres del encabezado, con líneas o sin ellas. El
+  encabezado puede estar solo en la primera página. El texto invisible que algunos escáneres agregan sobre la imagen no
+  se usa: esa página se lee de la imagen, como cualquier escaneo. Un mismo PDF puede tener páginas de los dos tipos.
+- **Mesas.** Con una columna «Mesa», o un título como «Mesa Nº 12» arriba de la tabla, cada persona queda en su mesa y
+  el archivo `.padron` trae una unidad por mesa. El título vale para toda la página; en un PDF con texto, un renglón que
+  dice solo «Mesa 13» entre las filas empieza otra mesa. Una página sin título propio no toma la mesa de la anterior: un
+  título mal leído no puede mandar a nadie a otra mesa.
+- **Fotos** en JPG, PNG o TIFF; un TIFF de varias páginas se lee página por página. Cada imagen se lleva al tamaño de
+  una hoja A4 a 300 dpi, suponiendo que la hoja ocupa toda la foto. En una foto de celular empareja la luz y endereza
+  hasta 3 grados, pero no corrige la perspectiva: anda mejor con la hoja plana, bien iluminada, sin sombras, sacada de
+  frente y ocupando toda la foto.
+
+En los padrones que no son de la facultad acepta además nombres sin coma («PRUEBA ANA»), el tipo antes del documento
+(«DNI 99.123.456»), legajos con otra forma (como 12345 o 12345/6) y cualquier palabra como estado. Los legajos con la
+forma de la facultad siguen pasando por su dígito verificador. Una fila queda para revisar si un valor no tiene su forma
+o si el modelo no estaba seguro al leerlo; lo que sale del texto de un PDF, solo por lo primero.
+
+**Todavía no lee** letra manuscrita, ni tablas sin un encabezado que reconozca y sin líneas: un listado de nombres sin
+títulos, o un escaneo sin líneas. Tampoco lee con una IA externa, con tu propia clave o con un servicio gratis: todavía
+no está disponible, todo se lee con el modelo local y el archivo `.padron` dice que ninguna IA externa vio los datos.
 
 ## Sin terminal: el lector de padrones
 
 El lector abre sus pantallas en el navegador y lleva paso a paso, con una pregunta por pantalla:
 
-1. **Elegir el padrón:** arrastrás el PDF escaneado a la ventana, o lo buscás en la computadora.
+1. **Elegir el padrón:** arrastrás el PDF o la foto del padrón a la ventana, o lo buscás en la computadora.
 2. **Leerlo:** la computadora lee página por página. Muestra por qué página va, cuántas personas encontró y cuánto
    falta, más o menos. Se puede cancelar.
 3. **Revisar:** muestra una por una las filas que no quedaron claras, con la imagen de la fila arriba y sus datos abajo,
    para corregirlos o decir que están bien. Las que no revises quedan pendientes y se revisan después en la app.
 4. **Guardar:** queda un archivo `.padron`. En Urna Abierta, entrás a la elección y lo subís con «Subir el padrón».
 
-**Es privado.** El PDF no sale de tu computadora, y el lector solo se puede abrir desde ella, con la dirección que
-muestra al arrancar. Guarda una copia del PDF en una carpeta temporal que solo tu usuario puede abrir y la borra al
+**Es privado.** El archivo no sale de tu computadora, y el lector solo se puede abrir desde ella, con la dirección que
+muestra al arrancar. Guarda una copia del archivo en una carpeta temporal que solo tu usuario puede abrir y la borra al
 cerrarse: con «Cerrar el lector», al cerrar su ventana, o solo, después de media hora sin usarlo. Si se corta de golpe,
 la borra la próxima vez que arranca. No guarda nada más.
 El archivo `.padron` tiene datos de personas: una vez subido a la app, conviene borrarlo.
 
-Por ahora entiende padrones hechos como una tabla con líneas. Si el padrón está en una planilla de Excel o CSV, no
-hace falta el lector: se sube directo en la app, con «Subir el padrón».
+Lo que entiende está en [Qué lee](#qué-lee). Si el padrón está en una planilla de Excel o CSV, no hace falta el lector:
+se sube directo en la app, con «Subir el padrón».
 
 Desde una copia de este repo se abre así:
 
@@ -128,8 +165,10 @@ uv run urna-padrones crosscheck ~/privado/otro.jsonl ~/privado/padron.jsonl
 uv run urna-padrones verify ~/privado/padron.jsonl ~/privado/planilla.xlsx --filas
 ```
 
-- `extract` guarda los datos con permisos solo para tu usuario, y se niega a escribirlos dentro de un repo de git. En una
-  terminal muestra por qué página va. `--pages N` lee solo las primeras N páginas y `--workers N`, cuántas a la vez.
+- `extract` toma un PDF o una imagen JPG, PNG o TIFF. Guarda los datos con permisos solo para tu usuario, y se niega a
+  escribirlos dentro de un repo de git. En una terminal muestra por qué página va. `--pages N` lee solo las primeras N
+  páginas y `--workers N`, cuántas a la vez. Al terminar dice cuántas filas leyó, cuántas páginas no tenían tabla y, si
+  las hay, cuántas leyó de su texto y cuántas mesas encontró.
 - `report`, `crosscheck` y `verify` muestran solo cantidades, nunca datos de una persona. `report` compara con la
   numeración del padrón para avisar si falta alguien.
 - `crosscheck` compara dos padrones que comparten gente. Como sus errores de lectura son independientes, sirve para medir
@@ -151,7 +190,12 @@ cumple: casi siempre es un número mal leído.
 uv run pytest
 ```
 
-Usan escaneos fabricados con personas inventadas. **Nunca subas un padrón real al repo.**
+Usan escaneos, PDF con texto y fotos fabricados con personas inventadas (`tests/fake_roll.py` y
+`tests/fake_layouts.py`). **Nunca subas un padrón real al repo.**
+
+En GitHub corren en Linux, Windows y macOS (`.github/workflows/tests.yml`). Las de `tests/test_extract.py` piden
+Liberation Sans por fontconfig y se saltean donde no está, como en Windows y macOS; las demás dibujan con Arial si no
+la encuentran.
 
 ## Cómo se arma el lector
 
