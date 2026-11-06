@@ -172,10 +172,10 @@ def read_roll(
     and RollError("cancelled") is raised. Straightening a page can take some seconds, and it is
     not interrupted. Both are called from the thread that called read_roll.
 
-    With a `service` (see external_ai), each page that would be read from its picture is sent to it
-    instead, as a picture, and the people it gives are cleaned and reviewed like those read here; the
-    pages read from their text are not sent. Every row of the reading then names the service in
-    `external_ai`, and so does the reading. Without one, nothing leaves the computer.
+    With a `service` (see external_ai), each page of a scan or a photo is sent to it instead, as a
+    picture, and the people it gives are cleaned and reviewed like those read here; a page of a PDF
+    with text is never sent, and is read here as without one. Every row of the reading then names
+    the service in `external_ai`, and so does the reading. Without one, nothing leaves the computer.
 
     Raises RollError with code "not_pdf" (neither a PDF nor a JPEG, PNG or TIFF), "encrypted",
     "damaged", "empty", "unknown_layout" (no page has a table this reader knows) or "cancelled". A
@@ -249,21 +249,23 @@ def _read_one(
     """One page: from its text when it or `columns` gives a header, from its picture otherwise.
 
     A page that is a picture, such as a scan with a stamp printed on it, takes no columns from another page: the
-    text on it is not a table. With a `service`, the picture goes to it instead of being read here, and the page is
-    not read again with another page's header: the service reads it whole.
+    text on it is not a table. With a `service`, the picture of a scanned page or a photo goes to it instead of being
+    read here, and the page is not read again with another page's header: the service reads it whole. A page with
+    text is never sent, also when its text is not a list this program knows: it is read here, from its picture.
     """
     text = page_text(path, index) if kind == "pdf" else None
+    has_text = text is not None and not text.scanned
     if text is not None:
         reading = read_text_page(text, index, None if text.scanned else columns)
         if reading.rows:
             return reading
     checkpoint()
     image = render(path, index)
-    if service is not None:
+    if service is not None and not has_text:
         sent = service.read_page(image, index, checkpoint)
-        return PageReading([], own_header=True, has_text=text is not None and not text.scanned, sent=sent)
+        return PageReading([], own_header=True, sent=sent)
     reading = read_page(image, index, checkpoint=checkpoint, photo=kind == "image", lend=lend, borrow=borrow)
-    reading.has_text = text is not None and not text.scanned
+    reading.has_text = has_text
     return reading
 
 

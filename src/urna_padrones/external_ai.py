@@ -1,11 +1,12 @@
 """Read a roll with an outside AI service, with the user's own key.
 
 The reading is local by default (see reading.py), and nothing here runs unless a program passes a service
-to read_roll. Then each page that would be read from its picture goes to that service as a JPEG made again
-from the page as the reader renders it: never the PDF, never the pages that are not being read, and without
-what a photo carries, such as where it was taken. The pages of a PDF with text are read from their text, and
-are not sent. Every value that comes back goes through the same cleaners and review rules as one read here,
-and a row is never taken as surer than they say: the service gives no confidence, and none is made up.
+to read_roll. Then each page of a scan or a photo goes to that service as a JPEG made again from the page as
+the reader renders it: never the PDF, never the pages that are not being read, and without what a photo
+carries, such as where it was taken. The pages of a PDF with text are never sent: they are read here, from
+their text or, when it is not a list this program knows, from their picture. Every value that comes back goes
+through the same cleaners and review rules as one read here, and a row is never taken as surer than they
+say: the service gives no confidence, and none is made up.
 
 Two kinds of service:
 
@@ -346,8 +347,8 @@ def warning(chosen: Service) -> str:
     """What a person reads before anything is sent."""
     return (
         f"Con --ia, el padrón se lee con {chosen.shown}, con tu clave:\n"
-        "- Van las imágenes de las páginas, con los nombres y los documentos de las personas. Las páginas de un PDF\n"
-        "  con texto se leen de su texto y no se mandan.\n"
+        "- Van las imágenes de las páginas escaneadas o fotografiadas, con los nombres y los documentos de las\n"
+        "  personas. Las páginas de un PDF con texto no se mandan: se leen en tu computadora.\n"
         "- Esa empresa los trata según sus condiciones: fijate si los usa para entrenar, cuánto tiempo los guarda y\n"
         "  en qué país.\n"
         "- El archivo .padron va a decir que una IA externa vio los datos. Según el nivel de seguridad de la\n"

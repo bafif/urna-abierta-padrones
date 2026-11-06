@@ -14,11 +14,11 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import numpy as np
 import pytest
 
-from fake_layouts import listing_page, pdf_bytes, people
+from fake_layouts import listing_page, pdf_bytes, people, text_content
 from fake_roll import draw_page, fake_rows, save_pdf
 from urna_padrones import cli, external_ai
 from urna_padrones.external_ai import AIError, MistralOCR, OpenAICompatible
-from urna_padrones.reading import read_roll
+from urna_padrones.reading import RollError, read_roll
 
 KEY = "clave-de-prueba"
 # A blank page, half the size of an A4 at 300 dpi: what the fake service answers does not depend on it.
@@ -319,3 +319,28 @@ def test_without_a_service_the_reading_opens_no_socket(tmp_path, monkeypatch, ca
     assert cli.main(["extract", str(roll), "--out", str(tmp_path / "salida.jsonl")]) == 0
     assert opened == []
     assert "6 filas" in capsys.readouterr().out
+
+
+def test_a_page_with_text_is_never_sent_even_when_its_text_is_not_a_list(fake, tmp_path):
+    keys, column_x = ["order", "document", "name"], [40, 80, 160, 330]
+    service = fake(mistral_answer(MARKDOWN))
+    # A cover with a title, and then a listing read from its text.
+    covered = tmp_path / "tapa.pdf"
+    covered.write_bytes(pdf_bytes([
+        {"content": text_content([(40, 100, 14, "Padron definitivo 2026 - Claustro estudiantes")])},
+        {"content": listing_page(people(4), ["Nº", "DNI", "Apellido y nombre"], keys, column_x)},
+    ]))
+    reading = read_roll(covered, workers=1, service=MistralOCR(KEY, service.url))
+    assert reading.pages_sent == [] and reading.pages_with_text == [1]
+    # Read here as without a service, and nothing says that a service saw it.
+    assert reading.records() == read_roll(covered, workers=1).records()
+    assert reading.external_ai is None and "external_ai" not in reading.records()[0]
+    # A listing whose header names nothing this program knows: read here from its picture, or not at all.
+    unknown = tmp_path / "otro.pdf"
+    unknown.write_bytes(pdf_bytes([{"content": listing_page(people(6), ["#", "Identificacion", "Elector"], keys,
+                                                             column_x)}]))
+    try:
+        assert read_roll(unknown, service=MistralOCR(KEY, service.url)).pages_sent == []
+    except RollError as error:
+        assert error.code == "unknown_layout"
+    assert service.requests == []
