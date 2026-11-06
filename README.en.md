@@ -291,6 +291,9 @@ It ends up in `dist/`. Some decisions:
   starts quickly, without unpacking 300 MB on every start, and antivirus programs pay it less attention.
 - Of rapidocr's models only the recognition model the reader uses goes in. Tk stays out, and so does OpenCV's video
   plugin (FFmpeg) on Windows.
+- setuptools stays out too: it is on the build machine because PyInstaller needs it, but the reader does not use it. A
+  test checks that the reader's code does not import it; of the libraries it carries, only two onnxruntime scripts that
+  time Llama and Whisper name it, and the reader never runs them.
 - The Windows and macOS icon is the mark of the reader's screens, in the colour of the «Aula» theme, on a transparent
   background. It is in `packaging/iconos/` and is made again with `uv run python tools/hacer-iconos.py`, which draws
   each size from the same SVG with rsvg-convert. Building the reader does not need rsvg-convert: the icons are already

@@ -290,6 +290,9 @@ Queda en `dist/`. Algunas decisiones:
   así arranca rápido, sin desempaquetar 300 MB en cada inicio, y los antivirus lo miran menos.
 - De los modelos de rapidocr va solo el de reconocimiento que usa el lector. Quedan afuera Tk y, en Windows, el
   complemento de video de OpenCV (FFmpeg).
+- También queda afuera setuptools: está en la máquina que arma porque PyInstaller lo necesita, pero el lector no lo
+  usa. Una prueba revisa que el código del lector no lo importe; de las bibliotecas que lleva, solo lo nombran dos
+  scripts de onnxruntime que miden la velocidad de Llama y de Whisper, y el lector nunca los corre.
 - El ícono de Windows y de macOS es la marca de las pantallas del lector, en el color del tema «Aula», sobre fondo
   transparente. Está en `packaging/iconos/` y se rehace con `uv run python tools/hacer-iconos.py`, que dibuja cada
   tamaño desde el mismo SVG con rsvg-convert. Para armar el lector no hace falta rsvg-convert: los íconos ya están

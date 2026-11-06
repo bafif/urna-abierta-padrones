@@ -1,5 +1,6 @@
 """The parts of the packaged reader that can be checked without building it (packaging/)."""
 
+import ast
 import importlib.util
 import os
 import subprocess
@@ -169,3 +170,15 @@ def test_the_icons_are_the_mark_in_every_size_each_system_asks_for():
     assert drawn.getpixel((0, 0))[3] == 0
     assert (0x17, 0x46, 0xC7, 255) in {colour for _, colour in drawn.getcolors(1 << 21)}
 
+
+def test_nothing_the_reader_runs_imports_setuptools():
+    """The spec leaves setuptools, pkg_resources and distutils out of the bundle: the reader must not need them."""
+    left_out = {"setuptools", "pkg_resources", "_distutils_hack", "distutils"}
+    for source in [*(ROOT / "src" / "urna_padrones").rglob("*.py"), PACKAGING / "launcher.py"]:
+        for node in ast.walk(ast.parse(source.read_text(encoding="utf-8"))):
+            names = [alias.name for alias in node.names] if isinstance(node, ast.Import) else []
+            if isinstance(node, ast.ImportFrom) and node.level == 0:
+                names = [node.module or ""]
+            assert not {name.split(".")[0] for name in names} & left_out, source
+    spec = (PACKAGING / "lector.spec").read_text(encoding="utf-8")
+    assert all(f'"{name}",' in spec for name in left_out)

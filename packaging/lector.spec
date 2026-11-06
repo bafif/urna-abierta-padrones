@@ -48,6 +48,13 @@ a = Analysis(
         "tensorrt",
         "MNN",
         "pytest",
+        # setuptools is in the build environment because PyInstaller needs it to build, not because the reader does:
+        # nothing it runs imports setuptools, pkg_resources or the distutils that comes with it. Of what the bundle
+        # carries, only onnxruntime's benchmark scripts for transformer models name pkg_resources, next to torch.
+        "setuptools",
+        "pkg_resources",
+        "_distutils_hack",
+        "distutils",
     ],
     optimize=0,
 )
