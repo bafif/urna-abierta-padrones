@@ -1,8 +1,9 @@
+import io
 import json
 import stat
 import zipfile
 
-from urna_padrones.padron import elector_from, write_padron
+from urna_padrones.padron import elector_from, padron_bytes, padron_summary, write_padron
 
 
 def record(**values):
@@ -47,6 +48,21 @@ def test_a_doubtful_row_stays_and_is_marked():
     assert elector_from(record(name=None), 0)["full_name"] == "(sin leer)"
 
 
+def test_an_order_that_is_not_a_number_from_1_is_left_out_and_asks_for_a_look():
+    for order in ("0", "00", "²", "①", "1²", "-3", "x", 0, True):
+        person = elector_from(record(order=order), 0)
+        assert "order" not in person, order
+        assert person["review"] == {"status": "pending"}, order
+    assert padron_summary([record(order="²"), record(order="0", document="99000002")]) == {"people": 2, "to_review": 2}
+
+
+def test_a_missing_order_is_fine():
+    for order in (None, ""):
+        person = elector_from(record(order=order), 0)
+        assert "order" not in person and person["review"] == {"status": "ok"}
+    assert elector_from(record(order=12), 0)["order"] == 12
+
+
 def test_the_file_says_how_many_people_it_has_and_only_its_owner_can_read_it(tmp_path):
     out = tmp_path / "prueba.padron"
     summary = write_padron([record(), record(document="99000002", needs_review=True)], out, title="Prueba")
@@ -56,6 +72,38 @@ def test_the_file_says_how_many_people_it_has_and_only_its_owner_can_read_it(tmp
     assert manifest["format"] == "padron-abierto"
     assert manifest["extraction"]["external_ai"] is False
     assert manifest["files"]["electors"]["count"] == len(electors) == 2
+
+
+def contents(data):
+    """What a .padron holds, without the moment it was made."""
+    with zipfile.ZipFile(io.BytesIO(data)) as archive:
+        names = archive.namelist()
+        manifest = json.loads(archive.read("manifest.json"))
+        electors = archive.read("electors.jsonl")
+    manifest.pop("created_at")
+    return names, manifest, electors
+
+
+def test_padron_bytes_is_what_write_padron_writes(tmp_path):
+    records = [record(), record(document="99000002", needs_review=True)]
+    out = tmp_path / "prueba.padron"
+    write_padron(records, out, title="Prueba")
+    assert contents(padron_bytes(records, title="Prueba")) == contents(out.read_bytes())
+    assert padron_summary(records) == {"people": 2, "to_review": 1}
+
+
+def test_a_row_a_person_confirmed_is_ok():
+    def status(data):
+        _, _, electors = contents(data)
+        return json.loads(electors)["review"]["status"]
+
+    doubtful = record(needs_review=True)
+    assert status(padron_bytes([doubtful])) == "pending"
+    doubtful["needs_review"] = False
+    assert status(padron_bytes([doubtful])) == "ok"
+    # Confirming a row without a usable identifier does not make it ok.
+    unusable = record(needs_review=False, valid={"document": False, "file_number": False})
+    assert status(padron_bytes([unusable])) == "pending"
 
 
 def test_a_repeated_document_never_drops_anyone(tmp_path):

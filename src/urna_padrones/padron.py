@@ -1,5 +1,6 @@
 """Writes the open roll format: a ZIP with manifest.json and electors.jsonl. See docs/formato-padron.md."""
 
+import io
 import json
 import os
 import zipfile
@@ -7,6 +8,17 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 FORMAT_VERSION = "0.1.0"
+
+
+def order_number(value) -> int | None:
+    """The order as a number from 1 up, or None if it is missing or is not one."""
+    if isinstance(value, bool) or not isinstance(value, (str, int)):
+        return None
+    text = str(value).strip()
+    if not text or any(c not in "0123456789" for c in text):
+        return None
+    number = int(text)
+    return number if number >= 1 else None
 
 
 def elector_from(record: dict, index: int) -> dict:
@@ -21,18 +33,20 @@ def elector_from(record: dict, index: int) -> dict:
     # The same person keeps the same id when a corrected roll is loaded again.
     identity = f"d-{document}" if document else f"l-{file_number}" if file_number else f"f-{index + 1}"
     elector: dict = {"id": identity, "full_name": record.get("name") or "(sin leer)", "identifiers": identifiers}
-    if record.get("order"):
-        elector["order"] = int(record["order"])
+    order = order_number(record.get("order"))
+    if order is not None:
+        elector["order"] = order
+    # An order that is there but is not a number from 1 up is left out, for a person to look at.
+    bad_order = record.get("order") not in (None, "") and order is None
     extra = {key: record[key] for key in ("program", "status") if record.get(key)}
     if extra:
         elector["extra"] = extra
-    pending = record.get("needs_review") or not record.get("name") or not identifiers
+    pending = record.get("needs_review") or not record.get("name") or not identifiers or bad_order
     elector["review"] = {"status": "pending" if pending else "ok"}
     return elector
 
 
-def write_padron(records: list[dict], out: Path, title: str | None = None) -> dict:
-    """Writes the file readable only by its owner, and says how many people went in and how many need a look."""
+def electors_from(records: list[dict]) -> list[dict]:
     seen: set[str] = set()
     electors = []
     for index, record in enumerate(records):
@@ -43,6 +57,33 @@ def write_padron(records: list[dict], out: Path, title: str | None = None) -> di
             elector["review"] = {"status": "pending"}
         seen.add(elector["id"])
         electors.append(elector)
+    return electors
+
+
+def _summary(electors: list[dict]) -> dict:
+    return {"people": len(electors), "to_review": sum(e["review"]["status"] == "pending" for e in electors)}
+
+
+def padron_summary(records: list[dict]) -> dict:
+    """How many people the file would have and how many of them are marked for review."""
+    return _summary(electors_from(records))
+
+
+def padron_bytes(records: list[dict], title: str | None = None) -> bytes:
+    """The .padron file for these records, as bytes: what write_padron writes, with its own created_at.
+
+    `records` are the extraction lines, as RollReading.records() returns them. Review works
+    like this: a record with "needs_review": false is written with review.status "ok", and one
+    with "needs_review": true with "pending". So a program where a person confirms or fixes a
+    row sets needs_review to false (and, if the person fixed the document or the file number,
+    also its "valid" flag to true). A row stays "pending" anyway when it has no name, when it
+    has neither a valid document nor a valid file number, when its order is not a number from 1
+    up (it is then left out), or when its id repeats an earlier one.
+    """
+    return _archive(electors_from(records), title)
+
+
+def _archive(electors: list[dict], title: str | None) -> bytes:
     manifest = {
         "format": "padron-abierto",
         "format_version": FORMAT_VERSION,
@@ -53,8 +94,21 @@ def write_padron(records: list[dict], out: Path, title: str | None = None) -> di
     }
     if title:
         manifest["title"] = title
-    descriptor = os.open(out, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(descriptor, "wb") as handle, zipfile.ZipFile(handle, "w", zipfile.ZIP_DEFLATED) as archive:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
         archive.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False, indent=1))
         archive.writestr("electors.jsonl", "".join(json.dumps(e, ensure_ascii=False) + "\n" for e in electors))
-    return {"people": len(electors), "to_review": sum(e["review"]["status"] == "pending" for e in electors)}
+    return buffer.getvalue()
+
+
+def write_padron(records: list[dict], out: Path, title: str | None = None) -> dict:
+    """Writes the file readable only by its owner, and says how many people went in and how many need a look.
+
+    The content is padron_bytes(records, title); see there how review works.
+    """
+    electors = electors_from(records)
+    data = _archive(electors, title)
+    descriptor = os.open(out, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(descriptor, "wb") as handle:
+        handle.write(data)
+    return _summary(electors)

@@ -1,8 +1,8 @@
 """Extract the rows of a scanned table, reading one column at a time."""
 
-from dataclasses import dataclass, field
-from pathlib import Path
 from collections import Counter
+from collections.abc import Callable
+from dataclasses import dataclass, field
 
 import cv2
 import numpy as np
@@ -10,7 +10,6 @@ import numpy as np
 from . import fields
 from .grid import Grid, find_grid, straighten
 from .ocr import read_cell
-from .pdf import render_page
 
 COLUMNS = ("order", "name", "program", "file_number", "document", "status")
 SEPARATORS_EXPECTED = len(COLUMNS) + 1  # the signature column at the right is not read
@@ -34,6 +33,10 @@ class Row:
     position: int
     raw: dict[str, str] = field(default_factory=dict)
     confidence: dict[str, float] = field(default_factory=dict)
+    # Where the row is on the straightened page: top, bottom, left, right, in pixels.
+    band: tuple[int, int, int, int] | None = None
+    # Degrees the page was rotated to straighten it, to rebuild the same image later.
+    skew: float = 0.0
 
     def checked(self, column: str) -> fields.Checked:
         return CLEANERS[column](self.raw.get(column, ""))
@@ -113,21 +116,35 @@ def infer_orders(rows: list[Row]) -> int:
     return fixed
 
 
-def extract_page(gray: np.ndarray, page: int) -> list[Row]:
-    straight, _ = straighten(gray)
+def _band(rows: tuple[int, int], separators: list[int], shape: tuple[int, ...]) -> tuple[int, int, int, int]:
+    """The row from its first to its last read column, kept inside the page."""
+    top, bottom = rows
+    height, width = shape[:2]
+    return max(0, top), min(height, bottom), max(0, separators[0]), min(width, separators[-1])
+
+
+def extract_page(gray: np.ndarray, page: int, checkpoint: Callable[[], None] | None = None) -> list[Row]:
+    """Read the rows of one page.
+
+    `checkpoint` runs before each step of the page and before each row: raising from it abandons
+    the page.
+    """
+    checkpoint = checkpoint or (lambda: None)
+    checkpoint()
+    straight, angle = straighten(gray)
+    checkpoint()
     grid, clean = find_grid(straight)
     separators = select_separators(grid.columns)
     if separators is None or not grid.rows:
         return []
-    rows = [Row(page=page, position=i) for i in range(len(grid.rows))]
+    rows = [
+        Row(page=page, position=i, band=_band(grid.rows[i], separators, straight.shape), skew=angle)
+        for i in range(len(grid.rows))
+    ]
     for row in rows:
+        checkpoint()
         _read_row(straight, clean, grid, separators, row)
     return [r for r in rows if not is_header(r)]
-
-
-def extract_file_page(args: tuple[Path, int]) -> list[Row]:
-    path, index = args
-    return extract_page(render_page(path, index), index + 1)
 
 
 def edit_distance(a: str, b: str, limit: int = 4) -> int:

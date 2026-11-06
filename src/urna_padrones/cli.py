@@ -5,17 +5,26 @@ import json
 import os
 import sys
 import time
-from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path
 
 from . import quality
 from .padron import write_padron
-from .pdf import page_count
-from .table import COLUMNS, build_vocabulary, extract_file_page, infer_orders, smooth_by_neighbours
+from .reading import RollError, read_roll
 
 
 def inside_git_repo(path: Path) -> bool:
     return any((parent / ".git").exists() for parent in path.resolve().parents)
+
+
+def positive(text: str) -> int:
+    value = int(text)
+    if value < 1:
+        raise argparse.ArgumentTypeError("tiene que ser 1 o más")
+    return value
+
+
+def show_progress(done: int, total: int) -> None:
+    print(f"\rpágina {done} de {total}", end="\n" if done == total else "", file=sys.stderr, flush=True)
 
 
 def extract(args: argparse.Namespace) -> int:
@@ -23,31 +32,26 @@ def extract(args: argparse.Namespace) -> int:
         print("La salida tiene datos personales y queda dentro de un repo de git: elegí otra carpeta.", file=sys.stderr)
         return 2
     started = time.monotonic()
-    pages = page_count(args.pdf)
-    selected = range(pages) if args.pages is None else range(min(args.pages, pages))
-    with ProcessPoolExecutor(max_workers=args.workers) as pool:
-        per_page = list(pool.map(extract_file_page, [(args.pdf, i) for i in selected]))
-    rows = [row for page in per_page for row in page]
-    inferred = infer_orders(rows)
-    raw_programs = [r.checked("program").value for r in rows]
-    vocabulary = build_vocabulary([p or "" for p in raw_programs])
-    programs = smooth_by_neighbours([vocabulary.get(p, p) for p in raw_programs])
+    shown = {"open": False}
+
+    def progress(done: int, total: int) -> None:
+        show_progress(done, total)
+        shown["open"] = done != total
+
+    try:
+        reading = read_roll(args.pdf, pages=args.pages, workers=args.workers,
+                            on_page=progress if sys.stderr.isatty() else None)
+    except RollError as error:
+        # The progress line has no newline yet: the message goes on a line of its own.
+        print("\n" if shown["open"] else "", error, sep="", file=sys.stderr)
+        return 1
     descriptor = os.open(args.out, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-        for row, program in zip(rows, programs):
-            checked = {c: row.checked(c) for c in COLUMNS}
-            record = {c: checked[c].value for c in COLUMNS}
-            record["program"] = program
-            record.update(
-                page=row.page,
-                valid={c: checked[c].valid for c in COLUMNS},
-                confidence=row.confidence,
-                repaired_file_number=checked["file_number"].repaired,
-                needs_review=row.needs_review(),
-            )
+        for record in reading.records():
             handle.write(json.dumps(record, ensure_ascii=False) + "\n")
-    print(f"{len(rows)} filas de {len(selected)} páginas en {time.monotonic() - started:.0f} s; "
-          f"páginas sin tabla: {sum(not p for p in per_page)}; números de orden inferidos: {inferred}")
+    print(f"{len(reading.rows)} filas de {reading.pages_read} páginas en {time.monotonic() - started:.0f} s; "
+          f"páginas sin tabla: {len(reading.pages_without_table)}; "
+          f"números de orden inferidos: {reading.inferred_orders}")
     return 0
 
 
@@ -71,14 +75,14 @@ def show_crosscheck(args: argparse.Namespace) -> int:
     return 0
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="urna-padrones", description=__doc__)
     commands = parser.add_subparsers(required=True)
     command = commands.add_parser("extract", help="extrae las filas de un PDF escaneado")
     command.add_argument("pdf", type=Path)
     command.add_argument("--out", type=Path, required=True)
-    command.add_argument("--pages", type=int)
-    command.add_argument("--workers", type=int, default=2)
+    command.add_argument("--pages", type=positive)
+    command.add_argument("--workers", type=positive, default=2)
     command.add_argument("--allow-inside-repo", action="store_true")
     command.set_defaults(run=extract)
     command = commands.add_parser("padron", help="arma el archivo .padron que se sube a Urna Abierta")
@@ -94,7 +98,7 @@ def main() -> int:
     command.add_argument("first", type=Path)
     command.add_argument("second", type=Path)
     command.set_defaults(run=show_crosscheck)
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     return args.run(args)
 
 
