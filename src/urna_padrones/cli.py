@@ -100,8 +100,8 @@ def show_verify(args: argparse.Namespace) -> int:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="urna-padrones", description=__doc__)
     commands = parser.add_subparsers(required=True)
-    command = commands.add_parser("extract", help="extrae las filas de un padrón en PDF, escaneado o con texto")
-    command.add_argument("pdf", type=Path)
+    command = commands.add_parser("extract", help="extrae las filas de un padrón en PDF o en fotos")
+    command.add_argument("pdf", type=Path, metavar="archivo", help="PDF escaneado o con texto, o imagen JPG, PNG o TIFF")
     command.add_argument("--out", type=Path, required=True)
     command.add_argument("--pages", type=positive)
     command.add_argument("--workers", type=positive, default=2)

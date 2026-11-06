@@ -169,6 +169,19 @@ def find_grid(gray: np.ndarray, row_columns: tuple[int, ...] = (0, 1, 4)) -> tup
     return Grid(columns=columns, rows=rows), clean
 
 
+def even_out_light(gray: np.ndarray) -> np.ndarray:
+    """A photo lit unevenly, made even like a scan: the paper turns white everywhere and the ink stays dark.
+
+    The light on the paper is measured without the ink, taking the brightest pixel around each one over
+    a window wider than any stroke and blurring that, and every pixel is divided by it.
+    """
+    paper = cv2.dilate(gray, np.ones((15, 15), np.uint8))
+    small = cv2.resize(paper, None, fx=0.125, fy=0.125, interpolation=cv2.INTER_AREA)
+    small = cv2.GaussianBlur(small, (0, 0), 3)
+    paper = cv2.resize(small, (gray.shape[1], gray.shape[0]), interpolation=cv2.INTER_LINEAR)
+    return cv2.divide(gray, np.maximum(paper, 1), scale=255)
+
+
 def straighten(gray: np.ndarray) -> tuple[np.ndarray, float]:
     angle = estimate_skew(binarize(gray))
     return rotate(gray, angle), angle

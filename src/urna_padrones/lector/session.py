@@ -1,7 +1,7 @@
 """One roll at a time: its private copy, the reading in the background, and what a person reviewed.
 
-The PDF is copied into a folder only this user can open and is deleted as soon as it is not
-needed: when another roll comes in, when the reading is cancelled, and when the reader closes.
+The PDF or picture is copied into a folder only this user can open and is deleted as soon as it
+is not needed: when another roll comes in, when the reading is cancelled, and when the reader closes.
 Nothing else is written anywhere.
 """
 
@@ -15,7 +15,7 @@ from typing import BinaryIO
 
 from ..errors import RollError
 from ..padron import padron_bytes, padron_summary
-from ..pdf import check_pdf
+from ..pages import check_roll
 from ..reading import COLUMNS, ReadRow, RollReading, read_roll, row_image
 from ..table import CONFIDENCE_CHECKED, SURE_CONFIDENCE
 
@@ -92,7 +92,7 @@ class Session:
     # ----- The roll -----
 
     def store(self, stream: BinaryIO, length: int, name: str) -> dict:
-        """Copy the uploaded PDF, `length` bytes from `stream`, and check it opens. Raises RollError."""
+        """Copy the uploaded PDF or picture, `length` bytes from `stream`, and check it opens. Raises RollError."""
         with self.upload_lock:
             self.forget()
             with self.lock:
@@ -108,7 +108,7 @@ class Session:
                             raise IncompleteUpload()
                         out.write(chunk)
                         left -= len(chunk)
-                pages = check_pdf(path)
+                pages = check_roll(path)
             except BaseException:
                 _remove(path)
                 raise

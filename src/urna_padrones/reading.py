@@ -5,8 +5,8 @@
         if row.needs_review:
             png = row_image(Path("padron.pdf"), row.box)
 
-A page of a PDF with real text is read from that text, exact; any other page is read from its
-picture. Pages are read in parallel by threads, each with its own model: the model and most image
+A roll is a PDF or a picture: a JPEG, a PNG or a TIFF of one or more pages. A page of a PDF with
+real text is read from that text, exact; any other page is read from its picture. Pages are read in parallel by threads, each with its own model: the model and most image
 operations release the GIL, so threads read as fast as processes and need nothing special
 inside a packaged program.
 """
@@ -23,7 +23,8 @@ import numpy as np
 
 from .errors import MESSAGES, RollError
 from .grid import rotate
-from .pdf import TARGET_DPI, check_pdf, render_page
+from .pages import check_roll, kind_of, render
+from .pdf import TARGET_DPI
 from .table import (
     COLUMNS,
     EXTRA,
@@ -155,22 +156,24 @@ def read_roll(
     and RollError("cancelled") is raised. Straightening a page can take some seconds, and it is
     not interrupted. Both are called from the thread that called read_roll.
 
-    Raises RollError with code "not_pdf", "encrypted", "damaged", "empty", "unknown_layout"
-    (no page has a table this reader knows) or "cancelled". A missing file raises OSError.
+    Raises RollError with code "not_pdf" (neither a PDF nor a JPEG, PNG or TIFF), "encrypted",
+    "damaged", "empty", "unknown_layout" (no page has a table this reader knows) or "cancelled". A
+    missing file raises OSError.
     """
     path = Path(path)
     if workers < 1:
         raise ValueError("workers must be at least 1")
     if pages is not None and pages < 1:
         raise ValueError("pages must be at least 1")
-    total = check_pdf(path)
+    total = check_roll(path)
+    kind = kind_of(path)
     count = total if pages is None else min(pages, total)
     if cancelled is not None and cancelled():
         raise RollError("cancelled")
     if on_page is not None:
         on_page(0, count)
-    per_page = _read_pages(path, count, workers, on_page, cancelled, on_rows)
-    _reread_without_header(path, per_page, cancelled)
+    per_page = _read_pages(path, kind, count, workers, on_page, cancelled, on_rows)
+    _reread_without_header(path, kind, per_page, cancelled)
     rows = [row for page in per_page for row in page.rows]
     if not rows:
         raise RollError("unknown_layout")
@@ -186,20 +189,22 @@ def read_roll(
     )
 
 
-def _read_one(path: Path, index: int, checkpoint: Callable[[], None]) -> PageReading:
+def _read_one(path: Path, kind: str, index: int, checkpoint: Callable[[], None]) -> PageReading:
     """One page: from its text when it has a header there, from its picture otherwise."""
-    text = page_text(path, index)
+    text = page_text(path, index) if kind == "pdf" else None
     if text is not None:
         reading = read_text_page(text, index)
         if reading.rows:
             return reading
     checkpoint()
-    reading = read_page(render_page(path, index), index, checkpoint=checkpoint)
+    reading = read_page(render(path, index), index, checkpoint=checkpoint, photo=kind == "image")
     reading.has_text = text is not None
     return reading
 
 
-def _reread_without_header(path: Path, per_page: list[PageReading], cancelled: Callable[[], bool] | None) -> None:
+def _reread_without_header(
+    path: Path, kind: str, per_page: list[PageReading], cancelled: Callable[[], bool] | None
+) -> None:
     """Read again, with the header of another page, the pages that had none of their own.
 
     A roll often prints its header only on the first page. A page with text takes the columns of the
@@ -228,11 +233,13 @@ def _reread_without_header(path: Path, per_page: list[PageReading], cancelled: C
                 continue
         if page.separators in headers:
             checkpoint()
-            per_page[index] = read_page(render_page(path, index), index, checkpoint, header=headers[page.separators])
+            image = render(path, index)
+            per_page[index] = read_page(image, index, checkpoint, header=headers[page.separators], photo=kind == "image")
 
 
 def _read_pages(
     path: Path,
+    kind: str,
     count: int,
     workers: int,
     on_page: Callable[[int, int], None] | None,
@@ -247,7 +254,7 @@ def _read_pages(
 
     def read(index: int) -> PageReading:
         checkpoint()
-        return _read_one(path, index, checkpoint)
+        return _read_one(path, kind, index, checkpoint)
 
     results: list[PageReading] = [PageReading([]) for _ in range(count)]
     pool = ThreadPoolExecutor(max_workers=min(workers, count), thread_name_prefix="urna-padrones")
@@ -335,7 +342,7 @@ def _straight_page(path: Path, page: int, skew: float) -> np.ndarray:
         if image is not None:
             _pages.move_to_end(key)
             return image
-    image = rotate(render_page(resolved, page), skew)
+    image = rotate(render(resolved, page), skew)
     with _pages_lock:
         _pages[key] = image
         while len(_pages) > CACHED_PAGES:

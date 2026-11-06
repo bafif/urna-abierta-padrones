@@ -1,9 +1,10 @@
-"""Rolls of invented people in other layouts than the faculty's: other columns, PDFs with text.
+"""Rolls of invented people in other layouts than the faculty's: other columns, PDFs with text, photos.
 
 Every document number is in the 99.000.000 range and every name is obviously invented. The people
 come from fake_roll.fake_rows, with an address and a table added.
 """
 
+import io
 import random
 import zlib
 from pathlib import Path
@@ -184,3 +185,32 @@ def listing_page(
 
 def make_listing_pdf(path: Path, pages: list[bytes]) -> None:
     Path(path).write_bytes(pdf_bytes([{"content": content} for content in pages]))
+
+
+# ----- Photos and image files -----
+
+
+def photo_of(page: np.ndarray, seed: int = 9, width: int = 3024) -> np.ndarray:
+    """A scanned page as a phone photo: smaller, slightly turned, unevenly lit and with JPEG blur."""
+    rng = np.random.default_rng(seed)
+    image = Image.fromarray(page).rotate(float(rng.uniform(-1.5, 1.5)), resample=Image.BICUBIC, fillcolor=235)
+    height = round(width * page.shape[0] / page.shape[1])
+    image = image.resize((width, height), Image.LANCZOS)
+    pixels = np.asarray(image, dtype=np.float32)
+    ys, xs = np.mgrid[0:height, 0:width]
+    light = 0.78 + 0.22 * (xs / width) * (1 - 0.4 * ys / height)
+    pixels = np.clip(pixels * light + rng.normal(0, 4, pixels.shape), 0, 255).astype(np.uint8)
+    buffer = io.BytesIO()
+    Image.fromarray(pixels).save(buffer, "JPEG", quality=85)
+    return np.asarray(Image.open(buffer).convert("L"))
+
+
+def save_image(pages: list[np.ndarray], path: Path, kind: str, dpi: int = 300) -> None:
+    """Save grayscale pages as a JPEG, a PNG or a TIFF (the only one with more than one page)."""
+    images = [Image.fromarray(page, mode="L") for page in pages]
+    if kind == "tiff":
+        images[0].save(path, "TIFF", compression="tiff_lzw", save_all=True, append_images=images[1:], dpi=(dpi, dpi))
+    elif kind == "jpeg":
+        images[0].save(path, "JPEG", quality=90, dpi=(dpi, dpi))
+    else:
+        images[0].save(path, "PNG", dpi=(dpi, dpi))

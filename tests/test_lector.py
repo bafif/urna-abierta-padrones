@@ -16,6 +16,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from fake_layouts import save_image
 from fake_roll import PAGE_SIZE, draw_page, fake_rows, find_font, save_pdf
 
 from urna_padrones.lector.server import CSP, FOLDER_PREFIX, PID_FILE, LectorServer, remove_leftovers
@@ -155,6 +156,18 @@ def test_a_file_that_is_not_a_pdf_is_refused_and_not_kept(reader, tmp_path):
     letter.write_bytes(b"Hola, esto no es un PDF.")
     status, body = upload(base, letter)
     assert (status, body) == (400, {"error": "not_pdf"})
+    (folder,) = private_folders(tmp)
+    assert copies(folder) == []
+
+
+def test_a_photo_is_taken_and_a_broken_one_is_not_kept(reader, tmp_path):
+    base, tmp = reader
+    photo = tmp_path / "foto del padrón.png"
+    save_image([np.full((400, 300), 250, np.uint8)], photo, "png")
+    assert upload(base, photo) == (200, {"pages": 1, "name": "foto del padrón.png"})
+    broken = tmp_path / "rota.jpg"
+    broken.write_bytes(b"\xff\xd8\xff" + b"esto no es una foto" * 20)
+    assert upload(base, broken) == (400, {"error": "damaged"})
     (folder,) = private_folders(tmp)
     assert copies(folder) == []
 

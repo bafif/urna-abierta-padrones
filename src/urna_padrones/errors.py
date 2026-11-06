@@ -1,12 +1,15 @@
 """Why a roll could not be read: a code a program can act on, and a message a person can read."""
 
 MESSAGES = {
-    "not_pdf": ("El archivo no es un PDF.", "The file is not a PDF."),
+    "not_pdf": (
+        "El archivo no es un PDF ni una imagen JPG, PNG o TIFF.",
+        "The file is neither a PDF nor a JPG, PNG or TIFF image.",
+    ),
     "encrypted": (
         "El PDF tiene contraseña: guardalo sin contraseña y probá de nuevo.",
         "The PDF is password protected: save it without a password and try again.",
     ),
-    "damaged": ("El PDF está dañado y no se puede abrir.", "The PDF is damaged and cannot be opened."),
+    "damaged": ("El archivo está dañado y no se puede abrir.", "The file is damaged and cannot be opened."),
     "empty": ("El PDF no tiene páginas.", "The PDF has no pages."),
     "unknown_layout": (
         "No encontré en ninguna página una tabla de padrón que sepa leer.",

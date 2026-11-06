@@ -13,7 +13,7 @@ import cv2
 import numpy as np
 
 from . import fields
-from .grid import Grid, find_grid, straighten
+from .grid import Grid, even_out_light, find_grid, straighten
 from .headers import Header, mesa_in, recognise
 from .ocr import read_cell
 
@@ -315,17 +315,20 @@ def read_page(
     page: int,
     checkpoint: Callable[[], None] | None = None,
     header: Header | None = None,
+    photo: bool = False,
 ) -> PageReading:
     """Read the rows of one scanned page, and the table its title gives them, if any.
 
     The page's own header says which column holds what. Without one, `header` (from another page of the
     same roll) does, and without either the page is read as the faculty's layout. A header that puts
     every column it names where the faculty's layout has it is read as that layout too, so those rolls
-    give exactly what they gave before. `checkpoint` runs before each step of the page and before each
-    row: raising from it abandons the page.
+    give exactly what they gave before. A `photo` has its light evened out first. `checkpoint` runs
+    before each step of the page and before each row: raising from it abandons the page.
     """
     checkpoint = checkpoint or (lambda: None)
     checkpoint()
+    if photo:
+        gray = even_out_light(gray)
     straight, angle = straighten(gray)
     checkpoint()
     grid, clean = find_grid(straight)

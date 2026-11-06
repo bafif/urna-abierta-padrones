@@ -5,7 +5,7 @@
       'language': 'Read this in English',
       'brand': 'Lector de padrones',
       'rail.pick': 'Elegir el padrón',
-      'rail.pick.when': 'El PDF escaneado',
+      'rail.pick.when': 'El PDF o la foto',
       'rail.read': 'Leerlo',
       'rail.read.when': 'Lo hace la computadora',
       'rail.review': 'Revisar',
@@ -16,22 +16,22 @@
       'rail.done': 'Hecho',
       'step': 'Paso {n} de 4',
       'pick.title': '¿Qué padrón leemos?',
-      'pick.text': 'Elegí el PDF escaneado del padrón.',
-      'pick.drop': 'Arrastrá el PDF acá',
+      'pick.text': 'Elegí el PDF o la foto del padrón.',
+      'pick.drop': 'Arrastrá el archivo acá',
       'pick.drop.text': 'o tocá para buscarlo en la computadora.',
       'pick.opening': 'Abriendo el archivo…',
       'pick.private': 'Es privado: el archivo no sale de esta computadora.',
-      'pick.choose': 'Elegir el PDF',
-      'pick.cancelled': 'Cancelaste la lectura. Podés elegir el mismo PDF u otro.',
-      'error.not_pdf': 'Ese archivo no es un PDF. Elegí el PDF escaneado del padrón.',
+      'pick.choose': 'Elegir el archivo',
+      'pick.cancelled': 'Cancelaste la lectura. Podés elegir el mismo archivo u otro.',
+      'error.not_pdf': 'Ese archivo no es un PDF ni una foto. Elegí el PDF o la foto del padrón: un JPG, PNG o TIFF.',
       'error.encrypted': 'El PDF tiene contraseña. Abrilo, guardalo sin contraseña y probá de nuevo.',
-      'error.damaged': 'El PDF está dañado y no se puede abrir. Probá con otra copia.',
+      'error.damaged': 'El archivo está dañado y no se puede abrir. Probá con otra copia.',
       'error.empty': 'El PDF no tiene páginas.',
       'error.too_large': 'El archivo es demasiado grande: puede tener hasta 512 MB.',
       'error.incomplete': 'El archivo no llegó entero. Probá de nuevo.',
-      'error.unknown_layout': 'Por ahora el lector solo entiende padrones hechos como una tabla con líneas, como los de la facultad. En este PDF no encontró ninguna.',
+      'error.unknown_layout': 'El lector entiende padrones hechos como una tabla con líneas, o un PDF con texto, con un encabezado que nombre las columnas, como «Apellido y nombre» y «DNI». También los de la facultad. En este archivo no encontró ninguno.',
       'error.unknown_layout.csv': 'Si tenés el padrón en una planilla de Excel o CSV, subila directo en la app, con «Subir el padrón».',
-      'error.internal': 'Algo falló al leer el padrón. Probá de nuevo y, si vuelve a pasar, con otra copia del PDF.',
+      'error.internal': 'Algo falló al leer el padrón. Probá de nuevo y, si vuelve a pasar, con otra copia del archivo.',
       'reading.title': 'Leyendo el padrón',
       'reading.text': 'Tarda unos segundos por página. Podés hacer otra cosa, pero no cierres esta ventana.',
       'reading.page': 'Página {n} de {total}',
@@ -44,8 +44,8 @@
       'reading.left.many': 'Unos {n} minutos',
       'reading.cancel': 'Cancelar',
       'reading.cancelling': 'Cancelando…',
-      'failed.title': 'No se pudo leer este PDF',
-      'failed.again': 'Probar con otro PDF',
+      'failed.title': 'No se pudo leer este archivo',
+      'failed.again': 'Probar con otro archivo',
       'summary.title': 'Revisá lo que no quedó claro',
       'summary.text': 'Ya está leído. Algunas filas conviene mirarlas con la imagen al lado.',
       'summary.text.none': 'Ya está leído, y todo quedó claro.',
@@ -58,8 +58,8 @@
       'summary.next': 'Seguir',
       'review.later': 'Las reviso después en la app',
       'review.counter': '{n} de {total}',
-      'review.page': 'Página {n} del PDF',
-      'review.image': 'La fila tal como está en el PDF',
+      'review.page': 'Página {n}',
+      'review.image': 'La fila tal como está en el original',
       'review.noImage': 'No hay imagen de esta fila.',
       'review.ok': 'Está bien',
       'review.save': 'Guardar cambio',
@@ -95,7 +95,7 @@
       'save.another': 'Leer otro padrón',
       'save.close': 'Cerrar el lector',
       'closed.title': 'Listo, ya podés cerrar esta ventana',
-      'closed.text': 'El lector se cerró y borró la copia del PDF.',
+      'closed.text': 'El lector se cerró y borró la copia del archivo.',
       'lost.title': 'El lector está cerrado',
       'lost.text': 'Se cerró su ventana, o pasó mucho tiempo sin usarlo. Para seguir, abrilo de nuevo.',
     },
@@ -103,7 +103,7 @@
       'language': 'Leer en castellano',
       'brand': 'Roll reader',
       'rail.pick': 'Choose the roll',
-      'rail.pick.when': 'The scanned PDF',
+      'rail.pick.when': 'The PDF or the photo',
       'rail.read': 'Read it',
       'rail.read.when': 'The computer does it',
       'rail.review': 'Review',
@@ -114,22 +114,22 @@
       'rail.done': 'Done',
       'step': 'Step {n} of 4',
       'pick.title': 'Which roll should we read?',
-      'pick.text': 'Choose the scanned PDF of the roll.',
-      'pick.drop': 'Drag the PDF here',
+      'pick.text': 'Choose the PDF or the photo of the roll.',
+      'pick.drop': 'Drag the file here',
       'pick.drop.text': 'or tap to find it on this computer.',
       'pick.opening': 'Opening the file…',
       'pick.private': 'It stays private: the file never leaves this computer.',
-      'pick.choose': 'Choose the PDF',
-      'pick.cancelled': 'You cancelled the reading. You can choose the same PDF or another one.',
-      'error.not_pdf': 'That file is not a PDF. Choose the scanned PDF of the roll.',
+      'pick.choose': 'Choose the file',
+      'pick.cancelled': 'You cancelled the reading. You can choose the same file or another one.',
+      'error.not_pdf': 'That file is not a PDF or a photo. Choose the PDF or the photo of the roll: a JPG, PNG or TIFF.',
       'error.encrypted': 'The PDF has a password. Open it, save it without a password and try again.',
-      'error.damaged': 'The PDF is damaged and cannot be opened. Try another copy.',
+      'error.damaged': 'The file is damaged and cannot be opened. Try another copy.',
       'error.empty': 'The PDF has no pages.',
       'error.too_large': 'The file is too large: it can be up to 512 MB.',
       'error.incomplete': 'Only part of the file arrived. Try again.',
-      'error.unknown_layout': 'For now the reader only understands rolls laid out as a ruled table, like the university ones. It found none in this PDF.',
+      'error.unknown_layout': 'The reader understands rolls laid out as a ruled table, or a PDF with text, with a header that names the columns, such as «Apellido y nombre» and «DNI». Also the university ones. It found none in this file.',
       'error.unknown_layout.csv': 'If you have the roll in an Excel or CSV spreadsheet, upload it straight into the app with “Upload the roll”.',
-      'error.internal': 'Something failed while reading the roll. Try again and, if it happens again, with another copy of the PDF.',
+      'error.internal': 'Something failed while reading the roll. Try again and, if it happens again, with another copy of the file.',
       'reading.title': 'Reading the roll',
       'reading.text': 'It takes a few seconds per page. You can do something else in the meantime, but keep this window open.',
       'reading.page': 'Page {n} of {total}',
@@ -142,8 +142,8 @@
       'reading.left.many': 'About {n} minutes',
       'reading.cancel': 'Cancel',
       'reading.cancelling': 'Cancelling…',
-      'failed.title': 'This PDF could not be read',
-      'failed.again': 'Try another PDF',
+      'failed.title': 'This file could not be read',
+      'failed.again': 'Try another file',
       'summary.title': 'Review what was not clear',
       'summary.text': 'Reading finished. Some rows are worth checking against their image.',
       'summary.text.none': 'Reading finished, and everything was clear.',
@@ -156,8 +156,8 @@
       'summary.next': 'Continue',
       'review.later': 'I’ll review them later in the app',
       'review.counter': '{n} of {total}',
-      'review.page': 'Page {n} of the PDF',
-      'review.image': 'The row as it is in the PDF',
+      'review.page': 'Page {n}',
+      'review.image': 'The row as it is in the original',
       'review.noImage': 'There is no image of this row.',
       'review.ok': 'Looks right',
       'review.save': 'Save change',
@@ -193,13 +193,17 @@
       'save.another': 'Read another roll',
       'save.close': 'Close the reader',
       'closed.title': 'Done, you can close this window',
-      'closed.text': 'The reader closed and deleted its copy of the PDF.',
+      'closed.text': 'The reader closed and deleted its copy of the file.',
       'lost.title': 'The reader is closed',
       'lost.text': 'Its window was closed, or it was not used for a long time. To continue, open it again.',
     },
   };
 
   const MAX_PDF = 512 * 1024 * 1024;
+  // A PDF, or a picture of the roll: what kind it is, the reader tells from its first bytes.
+  const READABLE = /\.(pdf|jpe?g|png|tiff?)$/i;
+  const READABLE_TYPES = ['application/pdf', 'image/jpeg', 'image/png', 'image/tiff'];
+  const ACCEPTED = ['.pdf', '.jpg', '.jpeg', '.png', '.tif', '.tiff', ...READABLE_TYPES].join(',');
   // The fields in the order a person reads a row, and how wide each one is on a grid of six.
   const FIELDS = [['name', 4], ['order', 2], ['document', 2], ['file_number', 2], ['status', 2], ['program', 6]];
   const LOGO = '<svg viewBox="0 0 48 48" aria-hidden="true"><path d="M7 15v21a6 6 0 006 6h22a6 6 0 006-6V15" fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round"/><rect x="17" y="4" width="14" height="22" rx="2" fill="currentColor" transform="rotate(8 24 15)"/></svg>';
@@ -317,7 +321,7 @@
     pick: () => ({
       eyebrow: t('step', { n: 1 }), title: t('pick.title'), text: t('pick.text'),
       body: `<label class="soltar grande ${state.busy ? 'ocupada' : ''}" data-testid="dropzone">
-          <input class="oculto" type="file" accept=".pdf,application/pdf" data-testid="pdf-file" ${state.busy ? 'disabled' : ''}>
+          <input class="oculto" type="file" accept="${ACCEPTED}" data-testid="pdf-file" ${state.busy ? 'disabled' : ''}>
           ${icon('hoja')}<strong>${state.busy ? t('pick.opening') : t('pick.drop')}</strong>${state.busy ? '' : t('pick.drop.text')}
         </label>
         <p class="aclara privado">${icon('candado')}<span>${t('pick.private')}</span></p>
@@ -425,7 +429,7 @@
   }
 
   function defaultTitle(name) {
-    return String(name ?? '').replace(/\.pdf$/i, '').replace(/[-_\s]+/g, ' ').trim().slice(0, 200);
+    return String(name ?? '').replace(READABLE, '').replace(/[-_\s]+/g, ' ').trim().slice(0, 200);
   }
 
   /** Follows the reading until it ends, one look per second. */
@@ -459,8 +463,8 @@
   async function loadPdf(file) {
     state.notice = '';
     state.problem = '';
-    const looksLikePdf = /\.pdf$/i.test(file.name) || file.type === 'application/pdf';
-    if (!looksLikePdf) {
+    const readable = READABLE.test(file.name) || READABLE_TYPES.includes(file.type);
+    if (!readable) {
       state.problem = t('error.not_pdf');
       return render();
     }
@@ -470,7 +474,7 @@
     }
     state.busy = true;
     render();
-    const { status, body } = await call(`pdf?name=${encodeURIComponent(file.name)}`, { method: 'POST', headers: { 'content-type': 'application/pdf' }, body: file });
+    const { status, body } = await call(`pdf?name=${encodeURIComponent(file.name)}`, { method: 'POST', headers: { 'content-type': file.type || 'application/octet-stream' }, body: file });
     state.busy = false;
     if (status !== 200) {
       state.problem = t(`error.${body.error ?? 'internal'}`);
