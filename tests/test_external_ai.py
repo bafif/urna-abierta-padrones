@@ -344,3 +344,25 @@ def test_a_page_with_text_is_never_sent_even_when_its_text_is_not_a_list(fake, t
     except RollError as error:
         assert error.code == "unknown_layout"
     assert service.requests == []
+
+
+@pytest.mark.parametrize("key", ["sk-SECRETO-1234\n# clave de prueba", "sk-SECRETO-ñ1234", "sk-SECRETO 1234"])
+def test_a_key_with_spaces_or_odd_letters_is_refused_without_showing_it(fake, tmp_path, capsys, monkeypatch, key):
+    service = fake(mistral_answer(MARKDOWN))
+    monkeypatch.setenv(external_ai.KEY_VARIABLE, key)
+    command = ["extract", str(scan(tmp_path)), "--out", str(tmp_path / "salida.jsonl"), "--ia", "mistral",
+               "--ia-url", service.url, "--acepto-enviar"]
+    assert cli.main(command) == 2
+    said = capsys.readouterr()
+    assert "en una línea" in said.err and "SECRETO" not in said.err + said.out
+    assert service.requests == []
+    with pytest.raises(AIError, match="una dirección no lleva"):
+        MistralOCR(KEY, service.url + "/v 1")
+
+
+def test_what_a_refusal_repeats_of_the_key_is_not_shown(fake, tmp_path):
+    service = fake(answer({"error": {"message": f"bad parameter; got Authorization: Bearer {KEY} and {KEY}\x1b[2J"}},
+                          status=400))
+    with pytest.raises(AIError, match="no aceptó el pedido") as error:
+        read_roll(scan(tmp_path), service=MistralOCR(KEY, service.url, wait=no_wait))
+    assert KEY not in str(error.value) and "Bearer …" in str(error.value) and "\x1b" not in str(error.value)

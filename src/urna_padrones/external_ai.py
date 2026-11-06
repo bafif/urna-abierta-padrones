@@ -25,6 +25,7 @@ import re
 import socket
 import ssl
 import time
+import unicodedata
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -147,8 +148,17 @@ class Service:
                 f"Falta la clave del servicio: guardala en la variable {KEY_VARIABLE}. No va como argumento, para "
                 "que no quede en el historial de la terminal."
             )
+        # A key goes in a header, which takes only plain letters, numbers and signs: anything else would stop the
+        # request with an error that shows the key.
+        if not _visible_ascii(key.strip()):
+            raise AIError(
+                f"La clave de {KEY_VARIABLE} tiene espacios, saltos de línea o letras que una clave no lleva: guardá "
+                "solo la clave, en una línea."
+            )
         if not model or not model.strip():
             raise AIError("Falta el modelo: decí cuál con --ia-modelo, con el nombre que le da el servicio.")
+        if not _visible_ascii(url.strip()):
+            raise AIError("La dirección del servicio tiene espacios o letras que una dirección no lleva.")
         parts = urllib.parse.urlsplit(url.strip())
         if parts.scheme not in ("https", "http") or not parts.hostname:
             raise AIError("La dirección del servicio tiene que ser como https://api.ejemplo.com/v1.")
@@ -214,7 +224,7 @@ class Service:
                 with self._opener.open(request, timeout=self.timeout) as response:
                     payload = response.read()
             except urllib.error.HTTPError as error:
-                status, detail = error.code, _detail(error)
+                status, detail = error.code, self._redact(_detail(error))
                 if status in (401, 403):
                     raise AIError(
                         f"{self.shown} rechazó la clave ({status}): fijate que sea de ese servicio y que siga activa."
@@ -244,6 +254,10 @@ class Service:
             except (ConnectionError, http.client.HTTPException, OSError):
                 failure = AIError(self._unreachable())
                 continue
+            except ValueError:
+                # The request could not be put together, as with a header a server cannot take; what the error says
+                # may hold the key, so it is not shown.
+                raise AIError(f"No se pudo armar el pedido a {self.host}: revisá la dirección y la clave.") from None
             try:
                 answer = json.loads(payload)
                 if not isinstance(answer, dict):
@@ -255,6 +269,10 @@ class Service:
                 continue
         assert failure is not None
         raise failure
+
+    def _redact(self, text: str) -> str:
+        """What a service said, without the key, should it repeat it."""
+        return re.sub(r"(?i)\b(bearer)\s+\S+", r"\1 …", text.replace(self.key, "…"))
 
     def _refused(self, refused: _Refused) -> AIError:
         detail = f": {refused.detail}" if refused.detail else ""
@@ -364,6 +382,29 @@ def data_url(image: np.ndarray) -> str:
     return "data:image/jpeg;base64," + base64.b64encode(encoded.tobytes()).decode("ascii")
 
 
+def _visible_ascii(text: str) -> bool:
+    return all("!" <= character <= "~" for character in text)
+
+
+def plain(text: str) -> tuple[str, bool]:
+    """A value without the characters a printed roll has not got, and whether it had none.
+
+    A control character, such as one that moves the cursor of a terminal, becomes a space; any other that does
+    not show, such as one that turns the text around, is dropped. Spaces are made one.
+    """
+    kept = []
+    clean = True
+    for character in text:
+        category = unicodedata.category(character)
+        if category.startswith("C"):
+            clean = clean and character in "\t\n\r"
+            if category == "Cc":
+                kept.append(" ")
+            continue
+        kept.append(character)
+    return " ".join("".join(kept).split()), clean
+
+
 def _detail(error: urllib.error.HTTPError) -> str:
     """What the service said about a request it did not take, on one short line, or ""."""
     try:
@@ -382,7 +423,7 @@ def _detail(error: urllib.error.HTTPError) -> str:
         message = message.get("message") or message.get("msg") or ""
     if isinstance(message, list):
         message = "; ".join(str(item.get("msg", item)) if isinstance(item, dict) else str(item) for item in message)
-    return " ".join(str(message).split())[:200]
+    return plain(str(message))[0][:200]
 
 
 def _retry_after(error: urllib.error.HTTPError, otherwise: float) -> float:
