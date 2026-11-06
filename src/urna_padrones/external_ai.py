@@ -453,7 +453,8 @@ def _chat_page(answer: dict) -> AIPage:
     message = choices[0].get("message")
     content = message.get("content") if isinstance(message, dict) else None
     if isinstance(content, list):
-        content = "".join(part.get("text", "") for part in content if isinstance(part, dict))
+        texts = [part.get("text") for part in content if isinstance(part, dict)]
+        content = "".join(text for text in texts if isinstance(text, str))
     if not isinstance(content, str) or not content.strip():
         raise _Malformed("vino vacía")
     if choices[0].get("finish_reason") == "length":

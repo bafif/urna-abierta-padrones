@@ -58,7 +58,8 @@ def mistral_answer(markdown: str) -> tuple:
 
 
 def chat_answer(content: str, finish: str = "stop") -> tuple:
-    return answer({"choices": [{"index": 0, "message": {"role": "assistant", "content": content}, "finish_reason": finish}]})
+    message = {"role": "assistant", "content": content}
+    return answer({"choices": [{"index": 0, "message": message, "finish_reason": finish}]})
 
 
 class FakeService:
