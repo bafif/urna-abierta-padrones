@@ -196,23 +196,35 @@ def _read_one(path: Path, index: int, checkpoint: Callable[[], None]) -> PageRea
 
 
 def _reread_without_header(path: Path, per_page: list[PageReading], cancelled: Callable[[], bool] | None) -> None:
-    """Read again, with the columns of another page, the pages with text that had no header of their own.
+    """Read again, with the header of another page, the pages that had none of their own.
 
-    A roll often prints its header only on the first page: a page with text takes the columns of the
-    first page with text that named them.
+    A roll often prints its header only on the first page. A page with text takes the columns of the
+    first page with text that named them; a scanned page takes the first header of a table with as many
+    columns. A roll read as the faculty's layout has no header to give, and is not read again.
     """
-    text_columns = next((page.text_columns for page in per_page if page.text_columns is not None), None)
-    if text_columns is None:
-        return
-    for index, page in enumerate(per_page):
-        if page.text_columns is not None or not page.has_text:
-            continue
+
+    def checkpoint() -> None:
         if cancelled is not None and cancelled():
             raise RollError("cancelled")
-        text = page_text(path, index)
-        reading = read_text_page(text, index, text_columns) if text is not None else None
-        if reading is not None and reading.rows:
-            per_page[index] = reading
+
+    text_columns = next((page.text_columns for page in per_page if page.text_columns is not None), None)
+    headers = {}
+    for page in per_page:
+        if page.header is not None:
+            headers.setdefault(page.separators, page.header)
+    for index, page in enumerate(per_page):
+        if page.header is not None or page.text_columns is not None:
+            continue
+        if page.has_text and text_columns is not None:
+            checkpoint()
+            text = page_text(path, index)
+            reading = read_text_page(text, index, text_columns) if text is not None else None
+            if reading is not None and reading.rows:
+                per_page[index] = reading
+                continue
+        if page.separators in headers:
+            checkpoint()
+            per_page[index] = read_page(render_page(path, index), index, checkpoint, header=headers[page.separators])
 
 
 def _read_pages(

@@ -1,4 +1,4 @@
-"""Rolls of invented people in other layouts than the faculty's: PDFs with text, other columns.
+"""Rolls of invented people in other layouts than the faculty's: other columns, PDFs with text.
 
 Every document number is in the 99.000.000 range and every name is obviously invented. The people
 come from fake_roll.fake_rows, with an address and a table added.
@@ -9,8 +9,9 @@ import zlib
 from pathlib import Path
 
 import numpy as np
+from PIL import Image, ImageDraw, ImageFilter
 
-from fake_roll import fake_rows
+from fake_roll import PAGE_SIZE, fake_rows, find_font
 
 POINTS = (595.28, 841.89)  # A4 in PDF points
 STREETS = ["Calle Inventada", "Avenida de Prueba", "Pasaje Ejemplo", "Calle Modelo"]
@@ -31,6 +32,49 @@ def cell_text(row: dict, key: str) -> str:
     """What a roll prints in a column: «family» and «given» are the two halves of the name."""
     family, _, given = row["name"].partition(", ")
     return {"family": family, "given": given, "typed_document": f"DNI {row['document']}"}.get(key, row.get(key, ""))
+
+
+# ----- Scanned tables -----
+
+
+def draw_ruled_page(
+    rows: list[dict],
+    headers: list[str],
+    keys: list[str],
+    column_x: list[int],
+    angle: float = 0.5,
+    seed: int = 5,
+    font=None,
+    title: str | None = None,
+    row_height: int = 46,
+    top: int = 260,
+) -> np.ndarray:
+    """A scanned page with a ruled table: `headers[i]` over column i, which holds `keys[i]` of each row.
+
+    `column_x` has one more line than there are columns. A key that is not a value of the rows leaves the
+    column empty, like a signature column.
+    """
+    font = font or find_font()[0]
+    image = Image.new("L", PAGE_SIZE, 250)
+    draw = ImageDraw.Draw(image)
+    if title:
+        draw.text((column_x[0], top - 120), title, fill=20, font=font)
+    bottom = top + row_height * (len(rows) + 1)
+    for x in column_x:
+        draw.line([(x, top), (x, bottom)], fill=40, width=3)
+    for i in range(len(rows) + 2):
+        y = top + i * row_height
+        draw.line([(column_x[0], y), (column_x[-1], y)], fill=60, width=2)
+    for x, header in zip(column_x, headers):
+        draw.text((x + 12, top + 4), header, fill=20, font=font)
+    for r, row in enumerate(rows, start=1):
+        y = top + r * row_height + 4
+        for x, key in zip(column_x, keys):
+            draw.text((x + 12, y), cell_text(row, key), fill=25, font=font)
+    image = image.rotate(angle, resample=Image.BICUBIC, fillcolor=250).filter(ImageFilter.GaussianBlur(0.6))
+    pixels = np.asarray(image, dtype=np.int16)
+    noise = np.random.default_rng(seed).normal(0, 6, pixels.shape)
+    return np.clip(pixels + noise, 0, 255).astype(np.uint8)
 
 
 # ----- PDFs with text -----

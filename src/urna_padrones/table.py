@@ -1,4 +1,9 @@
-"""Extract the rows of a table, reading one column at a time."""
+"""Extract the rows of a table, reading one column at a time.
+
+The columns of a scanned table are found by the names in its header row. A table whose header names
+nothing this program knows is read as the faculty's rolls are laid out, exactly as before headers
+were looked at.
+"""
 
 from collections import Counter
 from collections.abc import Callable
@@ -9,6 +14,7 @@ import numpy as np
 
 from . import fields
 from .grid import Grid, find_grid, straighten
+from .headers import Header, recognise
 from .ocr import read_cell
 
 COLUMNS = ("order", "name", "program", "file_number", "document", "status")
@@ -41,6 +47,9 @@ BLANK_INK_SHARE = 0.002
 # Measured against two real rolls: below this, most names read differently in each one.
 SURE_CONFIDENCE = 0.90
 CONFIDENCE_CHECKED = ("name", "document", "file_number")
+# The header is looked for in the first rows of the table: a title may come before it, or the header may
+# take two lines.
+HEADER_ROWS = 3
 
 
 def cleaner(column: str, layout: str = FACULTY) -> Callable[[str], fields.Checked]:
@@ -84,6 +93,10 @@ class PageReading:
     """What one page gave: its people, and what a page of the same roll without a header can take from it."""
 
     rows: list[Row]
+    # The header the page has, unless it is the faculty's layout, which needs no header.
+    header: Header | None = None
+    # How many column lines its table has: a page without a header takes only a header with as many columns.
+    separators: int = 0
     # The columns of a page with text, found by its header (see textlayer).
     text_columns: object | None = None
     # Whether the PDF page has text at all, even when it gave no rows.
@@ -165,6 +178,34 @@ def is_person(row: Row) -> bool:
     return bool(name.value) and (numbered or name.valid)
 
 
+def fits_faculty(header: Header) -> bool:
+    """Whether every column a header names is where the faculty's layout has it."""
+    return all(key is None or (i < len(COLUMNS) and COLUMNS[i] == key) for i, key in enumerate(header.keys))
+
+
+def find_header(clean: np.ndarray, grid: Grid, checkpoint: Callable[[], None]) -> tuple[Header | None, int]:
+    """The header among the first rows of the table and the row it ends on, or (None, -1).
+
+    A header split over two lines, such as «Nro. de» over «documento», is read as one.
+    """
+    if len(grid.columns) < 3:
+        return None, -1
+    previous: list[str] | None = None
+    for position in range(min(HEADER_ROWS, len(grid.rows))):
+        checkpoint()
+        texts = []
+        for index in range(len(grid.columns) - 1):
+            crop = _cell(clean, grid, grid.columns, position, index)
+            texts.append("" if _is_blank(crop) else read_cell(crop)[0])
+        header = recognise(texts, fuzzy=True)
+        if header is None and previous is not None:
+            header = recognise([f"{above} {below}".strip() for above, below in zip(previous, texts)], fuzzy=True)
+        if header is not None:
+            return header, position
+        previous = texts
+    return None, -1
+
+
 def infer_orders(rows: list[Row]) -> int:
     """Fix numbers that disagree with both neighbours, since numbering is consecutive.
 
@@ -210,17 +251,55 @@ def _faculty_rows(
     return [r for r in rows if not is_header(r)]
 
 
-def read_page(gray: np.ndarray, page: int, checkpoint: Callable[[], None] | None = None) -> PageReading:
-    """Read the rows of one scanned page, laid out as the faculty's rolls.
+def _header_rows(
+    straight: np.ndarray,
+    clean: np.ndarray,
+    grid: Grid,
+    header: Header,
+    start: int,
+    page: int,
+    angle: float,
+    checkpoint: Callable[[], None],
+) -> list[Row]:
+    """The rows from `start` on of a table whose columns a header named. Columns it did not name are not read."""
+    separators = grid.columns
+    cells = [(i, key) for i, key in enumerate(header.keys) if key and i + 1 < len(separators)]
+    rows = []
+    for position in range(start, len(grid.rows)):
+        checkpoint()
+        band = _band(grid.rows[position], separators, straight.shape)
+        row = Row(page=page, position=position, band=band, skew=angle, layout=BY_HEADER, columns=header.fields())
+        _read_row(straight, clean, grid, separators, row, cells)
+        join_name(row)
+        rows.append(row)
+    return [row for row in rows if is_person(row)]
 
-    `checkpoint` runs before each step of the page and before each row: raising from it abandons the page.
+
+def read_page(
+    gray: np.ndarray,
+    page: int,
+    checkpoint: Callable[[], None] | None = None,
+    header: Header | None = None,
+) -> PageReading:
+    """Read the rows of one scanned page.
+
+    The page's own header says which column holds what. Without one, `header` (from another page of the
+    same roll) does, and without either the page is read as the faculty's layout. A header that puts
+    every column it names where the faculty's layout has it is read as that layout too, so those rolls
+    give exactly what they gave before. `checkpoint` runs before each step of the page and before each
+    row: raising from it abandons the page.
     """
     checkpoint = checkpoint or (lambda: None)
     checkpoint()
     straight, angle = straighten(gray)
     checkpoint()
     grid, clean = find_grid(straight)
-    return PageReading(_faculty_rows(straight, clean, grid, page, angle, checkpoint))
+    own, start = (None, -1) if header is not None else find_header(clean, grid, checkpoint)
+    chosen = header or own
+    if chosen is None or (own is not None and fits_faculty(own) and select_separators(grid.columns) is not None):
+        return PageReading(_faculty_rows(straight, clean, grid, page, angle, checkpoint), separators=len(grid.columns))
+    rows = _header_rows(straight, clean, grid, chosen, start + 1, page, angle, checkpoint)
+    return PageReading(rows, header=own, separators=len(grid.columns))
 
 
 def extract_page(gray: np.ndarray, page: int, checkpoint: Callable[[], None] | None = None) -> list[Row]:
