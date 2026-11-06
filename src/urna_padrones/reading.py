@@ -6,9 +6,9 @@
             png = row_image(Path("padron.pdf"), row.box)
 
 A roll is a PDF or a picture: a JPEG, a PNG or a TIFF of one or more pages. A page of a PDF with
-real text is read from that text, exact; any other page is read from its picture. Pages are read in parallel by threads, each with its own model: the model and most image
-operations release the GIL, so threads read as fast as processes and need nothing special
-inside a packaged program.
+real text is read from that text, exact; any other page is read from its picture. Pages are read
+in parallel by threads, each with its own model: the model and most image operations release the
+GIL, so threads read as fast as processes and need nothing special inside a packaged program.
 """
 
 import threading
@@ -37,7 +37,7 @@ from .table import (
     read_page,
     smooth_by_neighbours,
 )
-from .textlayer import page_text, read_text_page
+from .textlayer import TextColumns, first_columns, page_text, read_text_page
 
 __all__ = [
     "COLUMNS",
@@ -53,6 +53,8 @@ __all__ = [
 
 # How often the calling thread asks whether the reading was cancelled.
 POLL_SECONDS = 0.1
+# How many pages of a PDF are looked at for a header in their text before reading.
+HEADER_PAGES = 10
 # Straightened pages kept for row_image: one page at 300 dpi takes about 9 MB.
 CACHED_PAGES = 4
 
@@ -172,7 +174,8 @@ def read_roll(
         raise RollError("cancelled")
     if on_page is not None:
         on_page(0, count)
-    per_page = _read_pages(path, kind, count, workers, on_page, cancelled, on_rows)
+    columns = _text_columns(path, count) if kind == "pdf" else None
+    per_page = _read_pages(path, kind, count, workers, on_page, cancelled, on_rows, columns)
     _reread_without_header(path, kind, per_page, cancelled)
     rows = [row for page in per_page for row in page.rows]
     if not rows:
@@ -189,11 +192,24 @@ def read_roll(
     )
 
 
-def _read_one(path: Path, kind: str, index: int, checkpoint: Callable[[], None]) -> PageReading:
-    """One page: from its text when it has a header there, from its picture otherwise."""
+def _text_columns(path: Path, count: int) -> TextColumns | None:
+    """The columns of the first header among the first pages with text, so that the pages after it, often without
+    a header of their own, are read from their text at once instead of being recognised from their picture first."""
+    for index in range(min(count, HEADER_PAGES)):
+        text = page_text(path, index)
+        columns = first_columns(text) if text is not None else None
+        if columns is not None:
+            return columns
+    return None
+
+
+def _read_one(
+    path: Path, kind: str, index: int, checkpoint: Callable[[], None], columns: TextColumns | None = None
+) -> PageReading:
+    """One page: from its text when it or `columns` gives a header, from its picture otherwise."""
     text = page_text(path, index) if kind == "pdf" else None
     if text is not None:
-        reading = read_text_page(text, index)
+        reading = read_text_page(text, index, columns)
         if reading.rows:
             return reading
     checkpoint()
@@ -245,6 +261,7 @@ def _read_pages(
     on_page: Callable[[int, int], None] | None,
     cancelled: Callable[[], bool] | None,
     on_rows: Callable[[int], None] | None = None,
+    columns: TextColumns | None = None,
 ) -> list[PageReading]:
     stop = threading.Event()
 
@@ -254,7 +271,7 @@ def _read_pages(
 
     def read(index: int) -> PageReading:
         checkpoint()
-        return _read_one(path, kind, index, checkpoint)
+        return _read_one(path, kind, index, checkpoint, columns)
 
     results: list[PageReading] = [PageReading([]) for _ in range(count)]
     pool = ThreadPoolExecutor(max_workers=min(workers, count), thread_name_prefix="urna-padrones")

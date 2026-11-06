@@ -10,6 +10,7 @@ import pytest
 from fake_layouts import listing_page, make_listing_pdf, pdf_bytes, people, text_content
 from fake_roll import draw_page, fake_rows, find_font
 from urna_padrones import cli
+from urna_padrones import reading as reading_module
 from urna_padrones.reading import RollError, read_roll, row_image
 from urna_padrones.textlayer import page_text
 
@@ -85,6 +86,26 @@ def test_the_command_line_writes_the_extra_values(listing, tmp_path, capsys):
     first = json.loads(out.read_text(encoding="utf-8").splitlines()[0])
     assert first["address"] == drawn[0]["address"] and first["document"] == drawn[0]["document"]
     assert "páginas con texto: 2" in capsys.readouterr().out
+
+
+def test_pages_after_the_header_are_read_from_their_text_at_once(listing, monkeypatch):
+    """No page of a listing is recognised from its picture first, even the ones without a header of their own."""
+    path, drawn, _, _ = listing
+    pictures = []
+    monkeypatch.setattr(reading_module, "render", lambda *args: pictures.append(args) or np.full((10, 10), 255, np.uint8))
+    again = read_roll(path)
+    assert pictures == [] and len(again.rows) == len(drawn)
+
+
+def test_a_page_of_prose_in_a_listing_is_not_read_as_people(tmp_path):
+    path = tmp_path / "con-nota.pdf"
+    drawn = people(10, seed=9)
+    note = text_content([(60, 100 + 16 * i, 10, f"Por la presente se informa a quien corresponda, renglón {c}.")
+                         for i, c in enumerate("abcdefghijklmnopqrst")])
+    make_listing_pdf(path, [listing_page(drawn, HEADERS, KEYS, COLUMN_X), note])
+    reading = read_roll(path)
+    assert [row.values["document"] for row in reading.rows] == [person["document"] for person in drawn]
+    assert reading.pages_without_table == [1]
 
 
 def test_family_name_and_given_names_in_two_columns_make_one_name(tmp_path):

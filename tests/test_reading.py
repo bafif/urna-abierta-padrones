@@ -13,10 +13,11 @@ import pytest
 from fake_roll import COLUMN_X, PAGE_SIZE, ROW_HEIGHT, make_encrypted_pdf, make_fake_roll_pdf, make_text_pdf
 from urna_padrones import cli, table
 from urna_padrones.fields import clean_document, fold
+from urna_padrones.grid import find_grid, straighten
 from urna_padrones.ocr import read_cell
 from urna_padrones.pdf import page_count, render_page
 from urna_padrones.reading import COLUMNS, RollError, read_roll, row_image
-from urna_padrones.table import build_vocabulary, extract_page, infer_orders, smooth_by_neighbours
+from urna_padrones.table import build_vocabulary, infer_orders, smooth_by_neighbours
 
 PAGES = 3
 ROWS_PER_PAGE = 20
@@ -266,9 +267,37 @@ def test_a_missing_file_is_an_os_error(tmp_path):
         read_roll(tmp_path / "no-existe.pdf")
 
 
+def faculty_page_as_before(gray, page):
+    """One page read as before headers were looked at: the faculty's columns in their order, nothing else."""
+    straight, angle = straighten(gray)
+    grid, clean = find_grid(straight)
+    separators = table.select_separators(grid.columns)
+    if separators is None or not grid.rows:
+        return []
+    rows = []
+    for position in range(len(grid.rows)):
+        band = table._band(grid.rows[position], separators, straight.shape)
+        row = table.Row(page=page, position=position, band=band, skew=angle)
+        for index, column in enumerate(COLUMNS):
+            crop = table._cell(clean, grid, separators, position, index)
+            if table._is_blank(crop):
+                continue
+            row.raw[column], row.confidence[column] = read_cell(crop)
+            checked = table.CLEANERS[column](row.raw[column])
+            if checked.valid and not checked.repaired:
+                continue
+            original = table._cell(straight, grid, separators, position, index)
+            second = read_cell(cv2.resize(original, None, fx=1.5, fy=1.5, interpolation=cv2.INTER_CUBIC))
+            retried = table.CLEANERS[column](second[0])
+            if retried.valid and not retried.repaired:
+                row.raw[column], row.confidence[column] = second
+        rows.append(row)
+    return [row for row in rows if not table.is_header(row)]
+
+
 def old_extract_lines(pdf):
-    """The extraction exactly as the command line wrote it before the library existed."""
-    per_page = [extract_page(render_page(pdf, i), i + 1) for i in range(page_count(pdf))]
+    """The extraction exactly as the command line wrote it before the library existed, and before headers."""
+    per_page = [faculty_page_as_before(render_page(pdf, i), i + 1) for i in range(page_count(pdf))]
     rows = [row for page in per_page for row in page]
     infer_orders(rows)
     raw_programs = [r.checked("program").value for r in rows]

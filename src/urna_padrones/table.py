@@ -173,15 +173,21 @@ def join_name(row: Row) -> None:
         row.confidence["name"] = min(scores, default=1.0)
 
 
+def has_number(row: Row, column: str) -> bool:
+    """Whether a value has a digit as written. A letter that looks like one, as cleaning reads it, is not enough:
+    in «renglón» the l and the o are not a document."""
+    return any(c in fields.ASCII_DIGITS for c in row.raw.get(column, ""))
+
+
 def is_person(row: Row) -> bool:
     """In a roll found by its header, a row is a person when it has a document, or a name with a number or a
     name that looks like one. Anything else, such as a repeated header or a page footer, is not."""
     name = row.checked("name")
     if fields.fold(row.raw.get("name", "")).startswith(("nombre", "apellido")):
         return False
-    if row.checked("document").value is not None:
+    if has_number(row, "document"):
         return True
-    numbered = any(row.checked(column).value is not None for column in ("order", "file_number"))
+    numbered = any(has_number(row, column) for column in ("order", "file_number"))
     return bool(name.value) and (numbered or name.valid)
 
 

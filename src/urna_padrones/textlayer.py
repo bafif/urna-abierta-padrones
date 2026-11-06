@@ -9,6 +9,7 @@ and the page is read from its picture like any other scan.
 """
 
 import ctypes
+import math
 import statistics
 import unicodedata
 from dataclasses import dataclass
@@ -18,9 +19,9 @@ import pypdfium2 as pdfium
 import pypdfium2.raw as pdfium_c
 
 from .errors import RollError
-from .headers import Header, mesa_in, recognise, split_labels
+from .headers import IDENTIFYING, Header, mesa_in, recognise, split_labels
 from .pdf import PDFIUM_LOCK, TARGET_DPI
-from .table import BY_HEADER, PageReading, Row, is_person, join_name
+from .table import BY_HEADER, PageReading, Row, has_number, is_person, join_name
 
 # A page with fewer visible letters than this has no table worth reading from its text.
 MIN_CHARACTERS = 20
@@ -128,7 +129,8 @@ def _characters(textpage: pdfium.PdfTextPage) -> list[Character | None]:
             continue
         item = pdfium_c.FPDFText_GetTextObject(raw, index)
         invisible = item and pdfium_c.FPDFTextObj_GetTextRenderMode(item) == pdfium_c.FPDF_TEXTRENDERMODE_INVISIBLE
-        if invisible or abs(pdfium_c.FPDFText_GetCharAngle(raw, index)) > 0.02:
+        angle = pdfium_c.FPDFText_GetCharAngle(raw, index)
+        if invisible or angle < 0 or min(angle, 2 * math.pi - angle) > 0.02:
             found.append(None)
             continue
         if not pdfium_c.FPDFText_GetLooseCharBox(raw, index, ctypes.byref(box)):
@@ -179,7 +181,8 @@ def lines_of(words: list[Word]) -> list[list[Word]]:
 
 
 def _joined(line: list[Word]) -> list[bool]:
-    return [line[i + 1].left - line[i].right <= CELL_GAP * max(line[i].size, line[i + 1].size) for i in range(len(line) - 1)]
+    """Whether each word is close enough to the next one to be in the same cell."""
+    return [after.left - before.right <= CELL_GAP * max(before.size, after.size) for before, after in zip(line, line[1:])]
 
 
 def header_columns(line: list[Word]) -> TextColumns | None:
@@ -207,6 +210,10 @@ def _column_of(left: float, right: float, spans: tuple[tuple[float, float, str |
     if overlaps[best] > 0:
         return best
     return min(range(len(spans)), key=lambda i: (_distance(left, right, spans[i]), i))
+
+
+def _identified(row: Row) -> bool:
+    return any(has_number(row, column) for column in IDENTIFYING if column in row.columns)
 
 
 def _text(line: list[Word]) -> str:
@@ -279,6 +286,11 @@ def cells_of(lines: list[list[Word]], columns: TextColumns) -> list[dict[str, st
     return found
 
 
+def first_columns(text: TextPage) -> TextColumns | None:
+    """The columns the first header line of a page names, or None."""
+    return next((found for found in map(header_columns, lines_of(text.words)) if found is not None), None)
+
+
 def read_text_page(text: TextPage, page: int, columns: TextColumns | None = None) -> PageReading:
     """The people on a page with text.
 
@@ -311,7 +323,8 @@ def read_text_page(text: TextPage, page: int, columns: TextColumns | None = None
         row = Row(page=page, position=len(rows), raw=values, layout=BY_HEADER, columns=fields, source="text")
         join_name(row)
         row.confidence = {key: 1.0 for key in row.raw}
-        if not is_person(row):
+        # On a page that borrows its columns, such as a cover letter in a listing, a name alone is not enough.
+        if not is_person(row) or (own is None and not _identified(row)):
             continue
         row.title_table = table
         top = min(word.top for word in line)
