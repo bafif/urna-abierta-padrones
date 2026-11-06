@@ -11,12 +11,15 @@ in parallel by threads, each with its own model: the model and most image operat
 GIL, so threads read as fast as processes and need nothing special inside a packaged program.
 """
 
+from __future__ import annotations
+
 import threading
 from collections import OrderedDict
 from collections.abc import Callable
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import cv2
 import numpy as np
@@ -39,6 +42,9 @@ from .table import (
     smooth_by_neighbours,
 )
 from .textlayer import TextColumns, first_columns, page_text, read_text_page
+
+if TYPE_CHECKING:
+    from .external_ai import Service
 
 __all__ = [
     "COLUMNS",
@@ -83,7 +89,7 @@ class ReadRow:
     each cell it read (1.0 for text taken from a PDF, -1 for an order number inferred from its
     neighbours). `layout` says how the row was read, `columns` which values its roll has. A program
     that lets a person confirm or fix the row sets `needs_review` to False afterwards (see fix() to
-    change a value).
+    change a value). `external_ai` names the outside service that saw the roll, when one did.
     """
 
     index: int
@@ -96,6 +102,7 @@ class ReadRow:
     box: RowBox | None
     layout: str = FACULTY
     columns: tuple[str, ...] = COLUMNS
+    external_ai: str | None = None
 
     def fix(self, column: str, text: str) -> bool:
         """Replace a value with what a person typed, cleaned like a read value. Returns whether it is valid."""
@@ -117,6 +124,8 @@ class ReadRow:
             repaired_file_number=self.repaired_file_number,
             needs_review=self.needs_review,
         )
+        if self.external_ai:
+            record["external_ai"] = self.external_ai
         return record
 
 
@@ -130,6 +139,9 @@ class RollReading:
     rows: list[ReadRow]
     # Pages read from their text instead of their picture, counted from 0.
     pages_with_text: list[int] = field(default_factory=list)
+    # Pages sent to an outside service, counted from 0, and the service, when one was used.
+    pages_sent: list[int] = field(default_factory=list)
+    external_ai: str | None = None
 
     def tables(self) -> list[str]:
         """The tables the people are at, in the order the roll first lists them."""
@@ -148,6 +160,7 @@ def read_roll(
     on_page: Callable[[int, int], None] | None = None,
     cancelled: Callable[[], bool] | None = None,
     on_rows: Callable[[int], None] | None = None,
+    service: Service | None = None,
 ) -> RollReading:
     """Read every row of a roll, or its first `pages` pages.
 
@@ -159,9 +172,14 @@ def read_roll(
     and RollError("cancelled") is raised. Straightening a page can take some seconds, and it is
     not interrupted. Both are called from the thread that called read_roll.
 
+    With a `service` (see external_ai), each page that would be read from its picture is sent to it
+    instead, as a picture, and the people it gives are cleaned and reviewed like those read here; the
+    pages read from their text are not sent. Every row of the reading then names the service in
+    `external_ai`, and so does the reading. Without one, nothing leaves the computer.
+
     Raises RollError with code "not_pdf" (neither a PDF nor a JPEG, PNG or TIFF), "encrypted",
     "damaged", "empty", "unknown_layout" (no page has a table this reader knows) or "cancelled". A
-    missing file raises OSError.
+    missing file raises OSError. A service that cannot read a page raises external_ai.AIError.
     """
     path = Path(path)
     if workers < 1:
@@ -176,21 +194,34 @@ def read_roll(
     if on_page is not None:
         on_page(0, count)
     columns = _text_columns(path, count) if kind == "pdf" else None
-    per_page = _read_pages(path, kind, count, workers, on_page, cancelled, on_rows, columns)
+    per_page = _read_pages(path, kind, count, workers, on_page, cancelled, on_rows, columns, service)
     _reread_without_header(path, kind, per_page, cancelled)
+    sent = [index for index, page in enumerate(per_page) if page.sent is not None]
+    if sent:
+        from .external_ai import rows_from
+
+        for page, rows in zip(per_page, rows_from([page.sent for page in per_page])):
+            if page.sent is not None:
+                page.rows = rows
     _carry_tables(per_page)
     rows = [row for page in per_page for row in page.rows]
     if not rows:
         raise RollError("unknown_layout")
     inferred = infer_orders(rows)
+    finished = _finish(rows)
+    seen_by = service.name if sent and service is not None else None
+    for row in finished:
+        row.external_ai = seen_by
     return RollReading(
         source_name=path.name,
         pages_total=total,
         pages_read=count,
         pages_without_table=[index for index, page in enumerate(per_page) if not page.rows],
         inferred_orders=inferred,
-        rows=_finish(rows),
+        rows=finished,
         pages_with_text=[index for index, page in enumerate(per_page) if page.rows and page.rows[0].source == "text"],
+        pages_sent=sent,
+        external_ai=seen_by,
     )
 
 
@@ -213,11 +244,13 @@ def _read_one(
     columns: TextColumns | None = None,
     lend: Callable[[dict[int, Header] | None], None] | None = None,
     borrow: Callable[[], dict[int, Header] | None] | None = None,
+    service: Service | None = None,
 ) -> PageReading:
     """One page: from its text when it or `columns` gives a header, from its picture otherwise.
 
     A page that is a picture, such as a scan with a stamp printed on it, takes no columns from another page: the
-    text on it is not a table.
+    text on it is not a table. With a `service`, the picture goes to it instead of being read here, and the page is
+    not read again with another page's header: the service reads it whole.
     """
     text = page_text(path, index) if kind == "pdf" else None
     if text is not None:
@@ -226,6 +259,9 @@ def _read_one(
             return reading
     checkpoint()
     image = render(path, index)
+    if service is not None:
+        sent = service.read_page(image, index, checkpoint)
+        return PageReading([], own_header=True, has_text=text is not None and not text.scanned, sent=sent)
     reading = read_page(image, index, checkpoint=checkpoint, photo=kind == "image", lend=lend, borrow=borrow)
     reading.has_text = text is not None and not text.scanned
     return reading
@@ -294,6 +330,7 @@ def _read_pages(
     cancelled: Callable[[], bool] | None,
     on_rows: Callable[[int], None] | None = None,
     columns: TextColumns | None = None,
+    service: Service | None = None,
 ) -> list[PageReading]:
     stop = threading.Event()
 
@@ -308,9 +345,9 @@ def _read_pages(
     def read(index: int) -> PageReading:
         checkpoint()
         if index:
-            return _read_one(path, kind, index, checkpoint, columns, borrow=lambda: lent.take(checkpoint))
+            return _read_one(path, kind, index, checkpoint, columns, borrow=lambda: lent.take(checkpoint), service=service)
         try:
-            return _read_one(path, kind, index, checkpoint, columns, lend=lent.give)
+            return _read_one(path, kind, index, checkpoint, columns, lend=lent.give, service=service)
         finally:
             lent.give(None)
 

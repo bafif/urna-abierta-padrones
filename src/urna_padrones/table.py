@@ -116,6 +116,9 @@ class PageReading:
     # Whether the page found a header of its own, the faculty's included: such a page is never read again with
     # another page's header.
     own_header: bool = False
+    # What an outside service read on the page, when it was sent to one (see external_ai): its rows come later,
+    # once every page is in.
+    sent: object | None = None
 
 
 def select_separators(columns: list[int]) -> list[int] | None:
