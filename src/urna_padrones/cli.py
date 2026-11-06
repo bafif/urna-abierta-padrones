@@ -50,9 +50,12 @@ def extract(args: argparse.Namespace) -> int:
     with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
         for record in reading.records():
             handle.write(json.dumps(record, ensure_ascii=False) + "\n")
-    print(f"{len(reading.rows)} filas de {reading.pages_read} páginas en {time.monotonic() - started:.0f} s; "
-          f"páginas sin tabla: {len(reading.pages_without_table)}; "
-          f"números de orden inferidos: {reading.inferred_orders}")
+    summary = (f"{len(reading.rows)} filas de {reading.pages_read} páginas en {time.monotonic() - started:.0f} s; "
+               f"páginas sin tabla: {len(reading.pages_without_table)}; "
+               f"números de orden inferidos: {reading.inferred_orders}")
+    if reading.pages_with_text:
+        summary += f"; páginas con texto: {len(reading.pages_with_text)}"
+    print(summary)
     return 0
 
 
@@ -94,7 +97,7 @@ def show_verify(args: argparse.Namespace) -> int:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="urna-padrones", description=__doc__)
     commands = parser.add_subparsers(required=True)
-    command = commands.add_parser("extract", help="extrae las filas de un PDF escaneado")
+    command = commands.add_parser("extract", help="extrae las filas de un padrón en PDF, escaneado o con texto")
     command.add_argument("pdf", type=Path)
     command.add_argument("--out", type=Path, required=True)
     command.add_argument("--pages", type=positive)

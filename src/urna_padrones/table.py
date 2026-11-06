@@ -1,4 +1,4 @@
-"""Extract the rows of a scanned table, reading one column at a time."""
+"""Extract the rows of a table, reading one column at a time."""
 
 from collections import Counter
 from collections.abc import Callable
@@ -12,6 +12,8 @@ from .grid import Grid, find_grid, straighten
 from .ocr import read_cell
 
 COLUMNS = ("order", "name", "program", "file_number", "document", "status")
+# Values that only a roll found by its header can have. The extraction lists them after COLUMNS.
+EXTRA = ("table", "address")
 SEPARATORS_EXPECTED = len(COLUMNS) + 1  # the signature column at the right is not read
 CLEANERS = {
     "order": fields.clean_order,
@@ -21,10 +23,29 @@ CLEANERS = {
     "document": fields.clean_document,
     "status": fields.clean_status,
 }
+# A roll found by its header has the same values, written in more ways than the faculty's.
+HEADER_CLEANERS = {
+    **CLEANERS,
+    "name": fields.clean_name_any,
+    "document": fields.clean_document_typed,
+    "file_number": fields.clean_file_number_any,
+    "status": fields.clean_status_any,
+    "table": fields.clean_table,
+    "address": fields.clean_address,
+    "family": fields.clean_name_part,
+    "given": fields.clean_name_part,
+}
+FACULTY = "facultad"
+BY_HEADER = "encabezado"
 BLANK_INK_SHARE = 0.002
 # Measured against two real rolls: below this, most names read differently in each one.
 SURE_CONFIDENCE = 0.90
 CONFIDENCE_CHECKED = ("name", "document", "file_number")
+
+
+def cleaner(column: str, layout: str = FACULTY) -> Callable[[str], fields.Checked]:
+    """How a value of `column` is cleaned and checked in a roll read with `layout`."""
+    return (CLEANERS if layout == FACULTY else HEADER_CLEANERS)[column]
 
 
 @dataclass
@@ -37,13 +58,18 @@ class Row:
     band: tuple[int, int, int, int] | None = None
     # Degrees the page was rotated to straighten it, to rebuild the same image later.
     skew: float = 0.0
+    # The faculty's layout or a header, and the values the roll has with it.
+    layout: str = FACULTY
+    columns: tuple[str, ...] = COLUMNS
+    # "ocr" when the values were read from an image, "text" when they are the text of a PDF, exact.
+    source: str = "ocr"
 
     def checked(self, column: str) -> fields.Checked:
-        return CLEANERS[column](self.raw.get(column, ""))
+        return cleaner(column, self.layout)(self.raw.get(column, ""))
 
     def needs_review(self) -> bool:
         """A person reads this row if a value breaks its format or the model was not sure."""
-        for column in COLUMNS:
+        for column in self.columns:
             checked = self.checked(column)
             if not checked.valid or checked.repaired:
                 return True
@@ -51,6 +77,17 @@ class Row:
             if doubtful and column in CONFIDENCE_CHECKED:
                 return True
         return False
+
+
+@dataclass
+class PageReading:
+    """What one page gave: its people, and what a page of the same roll without a header can take from it."""
+
+    rows: list[Row]
+    # The columns of a page with text, found by its header (see textlayer).
+    text_columns: object | None = None
+    # Whether the PDF page has text at all, even when it gave no rows.
+    has_text: bool = False
 
 
 def select_separators(columns: list[int]) -> list[int] | None:
@@ -69,8 +106,16 @@ def _is_blank(crop: np.ndarray) -> bool:
     return crop.size == 0 or float((crop < 128).mean()) < BLANK_INK_SHARE
 
 
-def _read_row(straight: np.ndarray, clean: np.ndarray, grid: Grid, separators: list[int], row: Row) -> None:
-    for index, column in enumerate(COLUMNS):
+def _read_row(
+    straight: np.ndarray,
+    clean: np.ndarray,
+    grid: Grid,
+    separators: list[int],
+    row: Row,
+    cells: list[tuple[int, str]],
+) -> None:
+    """Read the cells of a row: `cells` says which column of the table holds which value."""
+    for index, column in cells:
         crop = _cell(clean, grid, separators, row.position, index)
         if _is_blank(crop):
             continue
@@ -85,7 +130,7 @@ def _read_row(straight: np.ndarray, clean: np.ndarray, grid: Grid, separators: l
         original = _cell(straight, grid, separators, row.position, index)
         larger = cv2.resize(original, None, fx=1.5, fy=1.5, interpolation=cv2.INTER_CUBIC)
         second, second_confidence = read_cell(larger)
-        retried = CLEANERS[column](second)
+        retried = cleaner(column, row.layout)(second)
         if retried.valid and not retried.repaired:
             row.raw[column] = second
             row.confidence[column] = second_confidence
@@ -99,13 +144,37 @@ def is_header(row: Row) -> bool:
     return named_like_header or not (has_order or has_document)
 
 
+def join_name(row: Row) -> None:
+    """A roll with the family name and the given names in two columns gets one name, «Family, Given»."""
+    parts = [fields.clean_name_part(row.raw.pop(key, "")).value for key in ("family", "given")]
+    scores = [row.confidence.pop(key) for key in ("family", "given") if key in row.confidence]
+    if any(parts):
+        row.raw["name"] = ", ".join(part for part in parts if part)
+        row.confidence["name"] = min(scores, default=1.0)
+
+
+def is_person(row: Row) -> bool:
+    """In a roll found by its header, a row is a person when it has a document, or a name with a number or a
+    name that looks like one. Anything else, such as a repeated header or a page footer, is not."""
+    name = row.checked("name")
+    if fields.fold(row.raw.get("name", "")).startswith(("nombre", "apellido")):
+        return False
+    if row.checked("document").value is not None:
+        return True
+    numbered = any(row.checked(column).value is not None for column in ("order", "file_number"))
+    return bool(name.value) and (numbered or name.valid)
+
+
 def infer_orders(rows: list[Row]) -> int:
-    """Fix numbers that disagree with both neighbours, since numbering is consecutive."""
+    """Fix numbers that disagree with both neighbours, since numbering is consecutive.
+
+    A number taken from the text of a PDF is exact and is never changed.
+    """
     fixed = 0
     numbers = [row.checked("order").value for row in rows]
     for i in range(1, len(rows) - 1):
         before, after = numbers[i - 1], numbers[i + 1]
-        if before is None or after is None or int(after) != int(before) + 2:
+        if before is None or after is None or int(after) != int(before) + 2 or rows[i].source == "text":
             continue
         expected = str(int(before) + 1)
         if numbers[i] != expected:
@@ -123,17 +192,10 @@ def _band(rows: tuple[int, int], separators: list[int], shape: tuple[int, ...]) 
     return max(0, top), min(height, bottom), max(0, separators[0]), min(width, separators[-1])
 
 
-def extract_page(gray: np.ndarray, page: int, checkpoint: Callable[[], None] | None = None) -> list[Row]:
-    """Read the rows of one page.
-
-    `checkpoint` runs before each step of the page and before each row: raising from it abandons
-    the page.
-    """
-    checkpoint = checkpoint or (lambda: None)
-    checkpoint()
-    straight, angle = straighten(gray)
-    checkpoint()
-    grid, clean = find_grid(straight)
+def _faculty_rows(
+    straight: np.ndarray, clean: np.ndarray, grid: Grid, page: int, angle: float, checkpoint: Callable[[], None]
+) -> list[Row]:
+    """The rows of a table laid out as the faculty's rolls: COLUMNS in this order, then the signature."""
     separators = select_separators(grid.columns)
     if separators is None or not grid.rows:
         return []
@@ -141,10 +203,29 @@ def extract_page(gray: np.ndarray, page: int, checkpoint: Callable[[], None] | N
         Row(page=page, position=i, band=_band(grid.rows[i], separators, straight.shape), skew=angle)
         for i in range(len(grid.rows))
     ]
+    cells = list(enumerate(COLUMNS))
     for row in rows:
         checkpoint()
-        _read_row(straight, clean, grid, separators, row)
+        _read_row(straight, clean, grid, separators, row, cells)
     return [r for r in rows if not is_header(r)]
+
+
+def read_page(gray: np.ndarray, page: int, checkpoint: Callable[[], None] | None = None) -> PageReading:
+    """Read the rows of one scanned page, laid out as the faculty's rolls.
+
+    `checkpoint` runs before each step of the page and before each row: raising from it abandons the page.
+    """
+    checkpoint = checkpoint or (lambda: None)
+    checkpoint()
+    straight, angle = straighten(gray)
+    checkpoint()
+    grid, clean = find_grid(straight)
+    return PageReading(_faculty_rows(straight, clean, grid, page, angle, checkpoint))
+
+
+def extract_page(gray: np.ndarray, page: int, checkpoint: Callable[[], None] | None = None) -> list[Row]:
+    """The rows of one scanned page (see read_page)."""
+    return read_page(gray, page, checkpoint).rows
 
 
 def edit_distance(a: str, b: str, limit: int = 4) -> int:

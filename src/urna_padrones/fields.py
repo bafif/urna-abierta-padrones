@@ -103,3 +103,70 @@ def clean_name(raw: str) -> Checked:
 def clean_program(raw: str) -> Checked:
     text = re.sub(r"\s+", " ", raw).strip(EDGE_NOISE)
     return Checked(text or None, bool(text))
+
+
+# Rolls other than the faculty's, found by their header, write some values in other ways. These take them,
+# and are used only for those rolls: the faculty's keeps its stricter checks.
+
+DOCUMENT_TYPE = re.compile(r"^\s*(?:dni|du|lc|le|ci|doc)\b\.?\s*(?:n[º°o]?\.?|nro\.?)?\s*:?\s*", re.IGNORECASE)
+OTHER_FILE_NUMBER = re.compile(r"^[A-Z]{0,3}-?\d{3,8}(?:[-/]\d{1,4})?$")
+
+
+def _plain_text(raw: str) -> str:
+    return re.sub(r"\s+", " ", raw).strip(EDGE_NOISE)
+
+
+def clean_name_any(raw: str) -> Checked:
+    """A name with its family name before a comma, as in the faculty's, or just its words, as in «PRUEBA ANA»."""
+    checked = clean_name(raw)
+    if checked.valid or not checked.value or "," in checked.value:
+        return checked
+    words = checked.value.split(" ")
+    return Checked(checked.value, len(words) >= 2 and all(NAME_ALLOWED.match(word) for word in words))
+
+
+def clean_name_part(raw: str) -> Checked:
+    """A family name or the given names, when a roll has them in two columns."""
+    text = _plain_text(raw)
+    return Checked(text or None, bool(text) and all(NAME_ALLOWED.match(word) for word in text.split(" ")))
+
+
+def clean_document_typed(raw: str) -> Checked:
+    """A document that may come with its type in front, as in «DNI 99.123.456» under «Tipo y número»."""
+    return clean_document(DOCUMENT_TYPE.sub("", raw, count=1))
+
+
+def clean_file_number_any(raw: str) -> Checked:
+    """The faculty's legajos keep their check digit; other plain ones, such as 12345 or 12345/6, are taken as they are."""
+    checked = clean_file_number(raw)
+    if checked.valid or checked.value is None or checked.repaired or FILE_NUMBER.match(checked.value):
+        return checked
+    return Checked(checked.value, bool(OTHER_FILE_NUMBER.match(checked.value)))
+
+
+def clean_status_any(raw: str) -> Checked:
+    """A status such as «Regular» or «Activo». A blank one is valid: the column may be filled only for some."""
+    checked = clean_status(raw)
+    if checked.valid:
+        return checked
+    text = _plain_text(raw)
+    if not text:
+        return Checked(None, True)
+    return Checked(text, len(text) <= 40 and all(c.isalpha() or c in " -." for c in text))
+
+
+def clean_table(raw: str) -> Checked:
+    """A table number, from «12», «012» or «Mesa 12». A blank one is doubtful: everyone in such a roll has a table."""
+    text = re.sub(r"^\s*mesa\b\.?\s*(?:n[º°o]?\.?|nro\.?)?\s*", "", raw, flags=re.IGNORECASE)
+    digits, clean = _digits(text)
+    if not digits:
+        return Checked(_plain_text(text) or None, False)
+    if clean and len(digits) <= 5 and int(digits) >= 1:
+        return Checked(str(int(digits)), True)
+    return Checked(digits, False)
+
+
+def clean_address(raw: str) -> Checked:
+    """An address is kept as it is written. A roll may leave it blank."""
+    text = _plain_text(raw)
+    return Checked(text or None, True)

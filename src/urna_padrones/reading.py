@@ -1,11 +1,12 @@
-"""Read a whole scanned roll: the library under the command line and the desktop program.
+"""Read a whole roll: the library under the command line and the desktop program.
 
     reading = read_roll(Path("padron.pdf"), on_page=show_progress, cancelled=user_cancelled)
     for row in reading.rows:
         if row.needs_review:
             png = row_image(Path("padron.pdf"), row.box)
 
-Pages are read in parallel by threads, each with its own model: the model and most image
+A page of a PDF with real text is read from that text, exact; any other page is read from its
+picture. Pages are read in parallel by threads, each with its own model: the model and most image
 operations release the GIL, so threads read as fast as processes and need nothing special
 inside a packaged program.
 """
@@ -14,7 +15,7 @@ import threading
 from collections import OrderedDict
 from collections.abc import Callable
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import cv2
@@ -23,7 +24,19 @@ import numpy as np
 from .errors import MESSAGES, RollError
 from .grid import rotate
 from .pdf import TARGET_DPI, check_pdf, render_page
-from .table import CLEANERS, COLUMNS, Row, build_vocabulary, extract_page, infer_orders, smooth_by_neighbours
+from .table import (
+    COLUMNS,
+    EXTRA,
+    FACULTY,
+    PageReading,
+    Row,
+    build_vocabulary,
+    cleaner,
+    infer_orders,
+    read_page,
+    smooth_by_neighbours,
+)
+from .textlayer import page_text, read_text_page
 
 __all__ = [
     "COLUMNS",
@@ -60,10 +73,13 @@ class ReadRow:
     """One person as read from the roll.
 
     `values` holds the cleaned value of each of COLUMNS, with the degree in "program" already
-    made consistent with its neighbours. `valid` says whether each value has its expected
-    format; `confidence` has the model's score for each cell it read (-1 for an order number
-    inferred from its neighbours). A program that lets a person confirm or fix the row sets
-    `needs_review` to False afterwards (see fix() to change a value).
+    made consistent with its neighbours, and "table" and "address" when the roll has them. `valid`
+    says whether each value the roll has has its expected format: a roll found by its header may
+    lack some of COLUMNS, and those are left out of `valid`. `confidence` has the model's score for
+    each cell it read (1.0 for text taken from a PDF, -1 for an order number inferred from its
+    neighbours). `layout` says how the row was read, `columns` which values its roll has. A program
+    that lets a person confirm or fix the row sets `needs_review` to False afterwards (see fix() to
+    change a value).
     """
 
     index: int
@@ -74,10 +90,12 @@ class ReadRow:
     repaired_file_number: bool
     needs_review: bool
     box: RowBox | None
+    layout: str = FACULTY
+    columns: tuple[str, ...] = COLUMNS
 
     def fix(self, column: str, text: str) -> bool:
         """Replace a value with what a person typed, cleaned like a read value. Returns whether it is valid."""
-        checked = CLEANERS[column](text)
+        checked = cleaner(column, self.layout)(text)
         self.values[column] = checked.value
         self.valid[column] = checked.valid
         if column == "file_number":
@@ -87,6 +105,7 @@ class ReadRow:
     def record(self) -> dict:
         """The row as one line of the extraction (JSONL). Its "page" counts from 1, as it always has."""
         record: dict = {c: self.values.get(c) for c in COLUMNS}
+        record.update({c: self.values[c] for c in EXTRA if c in self.values})
         record.update(
             page=self.page + 1,
             valid=dict(self.valid),
@@ -105,6 +124,8 @@ class RollReading:
     pages_without_table: list[int]
     inferred_orders: int
     rows: list[ReadRow]
+    # Pages read from their text instead of their picture, counted from 0.
+    pages_with_text: list[int] = field(default_factory=list)
 
     def records(self) -> list[dict]:
         """The rows as the dicts the command line writes, one JSONL line each, and padron_bytes takes."""
@@ -120,7 +141,7 @@ def read_roll(
     cancelled: Callable[[], bool] | None = None,
     on_rows: Callable[[int], None] | None = None,
 ) -> RollReading:
-    """Read every row of a scanned roll, or its first `pages` pages.
+    """Read every row of a roll, or its first `pages` pages.
 
     `on_page(pages_done, pages_total)` is called once with 0 when reading starts and then each
     time a page is done; `pages_total` is the number of pages being read. Right after each page,
@@ -145,7 +166,8 @@ def read_roll(
     if on_page is not None:
         on_page(0, count)
     per_page = _read_pages(path, count, workers, on_page, cancelled, on_rows)
-    rows = [row for page in per_page for row in page]
+    _reread_without_header(path, per_page, cancelled)
+    rows = [row for page in per_page for row in page.rows]
     if not rows:
         raise RollError("unknown_layout")
     inferred = infer_orders(rows)
@@ -153,10 +175,44 @@ def read_roll(
         source_name=path.name,
         pages_total=total,
         pages_read=count,
-        pages_without_table=[index for index, page in enumerate(per_page) if not page],
+        pages_without_table=[index for index, page in enumerate(per_page) if not page.rows],
         inferred_orders=inferred,
         rows=_finish(rows),
+        pages_with_text=[index for index, page in enumerate(per_page) if page.rows and page.rows[0].source == "text"],
     )
+
+
+def _read_one(path: Path, index: int, checkpoint: Callable[[], None]) -> PageReading:
+    """One page: from its text when it has a header there, from its picture otherwise."""
+    text = page_text(path, index)
+    if text is not None:
+        reading = read_text_page(text, index)
+        if reading.rows:
+            return reading
+    checkpoint()
+    reading = read_page(render_page(path, index), index, checkpoint=checkpoint)
+    reading.has_text = text is not None
+    return reading
+
+
+def _reread_without_header(path: Path, per_page: list[PageReading], cancelled: Callable[[], bool] | None) -> None:
+    """Read again, with the columns of another page, the pages with text that had no header of their own.
+
+    A roll often prints its header only on the first page: a page with text takes the columns of the
+    first page with text that named them.
+    """
+    text_columns = next((page.text_columns for page in per_page if page.text_columns is not None), None)
+    if text_columns is None:
+        return
+    for index, page in enumerate(per_page):
+        if page.text_columns is not None or not page.has_text:
+            continue
+        if cancelled is not None and cancelled():
+            raise RollError("cancelled")
+        text = page_text(path, index)
+        reading = read_text_page(text, index, text_columns) if text is not None else None
+        if reading is not None and reading.rows:
+            per_page[index] = reading
 
 
 def _read_pages(
@@ -166,18 +222,18 @@ def _read_pages(
     on_page: Callable[[int, int], None] | None,
     cancelled: Callable[[], bool] | None,
     on_rows: Callable[[int], None] | None = None,
-) -> list[list[Row]]:
+) -> list[PageReading]:
     stop = threading.Event()
 
     def checkpoint() -> None:
         if stop.is_set():
             raise RollError("cancelled")
 
-    def read(index: int) -> list[Row]:
+    def read(index: int) -> PageReading:
         checkpoint()
-        return extract_page(render_page(path, index), index, checkpoint=checkpoint)
+        return _read_one(path, index, checkpoint)
 
-    results: list[list[Row]] = [[] for _ in range(count)]
+    results: list[PageReading] = [PageReading([]) for _ in range(count)]
     pool = ThreadPoolExecutor(max_workers=min(workers, count), thread_name_prefix="urna-padrones")
     futures = {pool.submit(read, index): index for index in range(count)}
     pending = set(futures)
@@ -190,7 +246,7 @@ def _read_pages(
             for future in done:
                 results[futures[future]] = future.result()
                 done_count += 1
-                rows_found += len(results[futures[future]])
+                rows_found += len(results[futures[future]].rows)
                 if on_page is not None:
                     on_page(done_count, count)
                 if on_rows is not None:
@@ -205,15 +261,27 @@ def _read_pages(
 
 
 def _finish(rows: list[Row]) -> list[ReadRow]:
-    """Clean every value and make the degree consistent along the roll."""
-    raw_programs = [row.checked("program").value for row in rows]
+    """Clean every value and make the degree read from pictures consistent along the roll.
+
+    A degree taken from the text of a PDF is exact and stays as it is.
+    """
+    programs = [row.checked("program").value for row in rows]
+    read = [index for index, row in enumerate(rows) if row.source != "text"]
+    raw_programs = [programs[index] for index in read]
     vocabulary = build_vocabulary([program or "" for program in raw_programs])
-    programs = smooth_by_neighbours([vocabulary.get(p, p) for p in raw_programs])
+    smoothed = smooth_by_neighbours([vocabulary.get(p, p) for p in raw_programs])
+    for index, program in zip(read, smoothed):
+        programs[index] = program
     finished = []
     for index, (row, program) in enumerate(zip(rows, programs)):
         checked = {c: row.checked(c) for c in COLUMNS}
         values = {c: checked[c].value for c in COLUMNS}
         values["program"] = program
+        valid = {c: checked[c].valid for c in COLUMNS if c in row.columns}
+        for column in EXTRA:
+            if column in row.columns:
+                extra = row.checked(column)
+                values[column], valid[column] = extra.value, extra.valid
         box = None
         if row.band is not None:
             top, bottom, left, right = row.band
@@ -223,11 +291,13 @@ def _finish(rows: list[Row]) -> list[ReadRow]:
                 index=index,
                 page=row.page,
                 values=values,
-                valid={c: checked[c].valid for c in COLUMNS},
+                valid=valid,
                 confidence=row.confidence,
                 repaired_file_number=checked["file_number"].repaired,
                 needs_review=row.needs_review(),
                 box=box,
+                layout=row.layout,
+                columns=row.columns,
             )
         )
     return finished
