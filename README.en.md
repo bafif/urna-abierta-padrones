@@ -28,25 +28,38 @@ from a terminal.
 - **The faculty's rolls**, whether their header is recognised or not. If it finds no header it knows, it reads the
   table with the faculty's columns in their order (number, name, program, student number, document, status and
   signature). If it recognises it and it puts each column where the faculty has it, too. The output is the same as
-  before, byte by byte: a test compares it with a copy of the reading as it was.
+  before, byte by byte, except when some page has a title such as «Mesa Nº 3» above it: then each row adds its table,
+  and those of a page without a title are left for review (see Tables). A test compares it with a copy of the reading
+  as it was. A page with a header of its own, the faculty's too, never takes another page's: one PDF may hold two
+  lists laid out differently.
 - **PDFs with text**, such as a listing exported from a spreadsheet or a system. It takes the text as it is, without
   recognising it: it gets no letter wrong, no row is left in doubt because of that, and it reads a page in a fraction of
   a second. It builds the rows by line and the columns by where the names of the header are, with or without ruling.
-  The header may be on the first page only. Invisible text that some scanners add over the picture is not used: that
-  page is read from its picture, like any scan. One PDF can have pages of both kinds.
+  The header may be on the first page only. A name that goes on onto a second line stays whole: a line without a
+  number or a document goes with the row above or below it, whichever is closer; if both are nearly as close, the row
+  is left for review. A line without numbers far from the rows, such as «Firma del presidente de mesa» at the foot, is
+  not a person. A page the PDF turns, as a viewer saves it after turning it, is read upright.
+- **What the PDF does not show is not used.** Invisible text that some scanners add over the picture, white text,
+  text that is only a clipping path and text covered by a picture are not read. A page covered by a picture is a scan
+  and is read from its picture, even with a stamp with text on it, such as «Copia fiel 05/11/2026»; its text is used
+  only if it names the columns in a header of its own. One PDF can have pages of both kinds.
 - **Tables (mesas).** With a «Mesa» column, or a title such as «Mesa Nº 12» above the table, each person stays at their
   table and the `.padron` file has one unit per table. A title applies to the whole page; in a PDF with text, a line
-  saying only «Mesa 13» among the rows starts another table. A page without a title of its own does not take the table
-  of the page before: a misread title cannot send anyone to another table.
+  saying only «Mesa 13» among the rows starts another table, and the table goes on onto the next page until the next
+  such line. A scanned page without a title of its own does not take the table of the page before: a misread title
+  cannot send anyone to another table. If the roll has tables, whoever is left without one is left for review.
 - **Photos** in JPG, PNG or TIFF; a TIFF with several pages is read page by page. Each picture is brought to the size of
   an A4 page at 300 dpi, taking the page to fill the whole photo. In a phone photo it evens out the light and
   straightens up to 3 degrees, but it does not correct perspective: it works best with the page flat, well lit, without
-  shadows, taken from straight above and filling the photo.
+  shadows, taken from straight above and filling the photo. A PNG with a transparent background is read on white
+  paper. A picture may have up to 120 million pixels (a 108-megapixel photo, or a page scanned at 1000 dpi): the size
+  is read from the first bytes of the file, before opening it, and a larger one is not opened.
 
 In rolls other than the faculty's it also takes names without a comma («PRUEBA ANA»), the document type before the
 number («DNI 99.123.456»), student numbers of other shapes (such as 12345 or 12345/6) and any word as a status. Student
 numbers with the faculty's shape still go through their check digit. A row is left for review if a value does not have
-its shape or the model was not sure when reading it; what comes from the text of a PDF, only for the first.
+its shape or the model was not sure when reading it; what comes from the text of a PDF, only for the first or because
+it is not clear which row a line belongs to. In a roll with tables, also if the row was left without one.
 
 **It does not read yet** handwriting, or tables without a header it recognises and without ruling: a list of names
 without titles, or a scan without lines. Nor does it read with an external AI, with your own key or a free service: that

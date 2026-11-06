@@ -132,7 +132,7 @@ Character = tuple[str, float, float, float, float, float, float]
 
 
 def _turn(rotation: int, crop: tuple[float, float, float, float]):
-    """From a point of the PDF page to the same point on the page as it is shown, both in points from the bottom left."""
+    """From a point of the PDF page to the same point on the page as it is shown, in points from the bottom left."""
     left, bottom, right, top = crop
     if rotation == 90:
         return lambda x, y: (y - bottom, right - x)

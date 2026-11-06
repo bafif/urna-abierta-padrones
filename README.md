@@ -26,26 +26,40 @@ público. Se usa con pantallas en el navegador, sin terminal, o desde una termin
   mal leída. Una página sin encabezado toma el de otra página del mismo padrón cuya tabla tenga tantas columnas.
 - **Los padrones de la facultad**, se reconozca o no su encabezado. Si no encuentra uno que conozca, lee la tabla con
   las columnas de la facultad en su orden (número, nombre, carrera, legajo, documento, calidad y firma). Si lo reconoce
-  y pone cada columna donde la tiene la facultad, también. La salida es la misma que antes, byte por byte: una prueba
-  la compara con una copia de la lectura de antes.
+  y pone cada columna donde la tiene la facultad, también. La salida es la misma que antes, byte por byte, salvo
+  cuando alguna página tiene arriba un título como «Mesa Nº 3»: entonces cada fila suma su mesa, y las de una página
+  sin título quedan para revisar (ver Mesas). Una prueba la compara con una copia de la lectura de antes. Una página
+  con un encabezado propio, el de la facultad también, nunca toma el de otra página: un mismo PDF puede traer dos
+  listas armadas distinto.
 - **PDF con texto**, como un listado exportado de una planilla o de un sistema. Toma el texto tal como está, sin
   reconocerlo: no se equivoca de letra, ninguna fila queda en duda por eso y lee una página en una fracción de segundo.
   Arma las filas por renglón y las columnas por dónde están los nombres del encabezado, con líneas o sin ellas. El
-  encabezado puede estar solo en la primera página. El texto invisible que algunos escáneres agregan sobre la imagen no
-  se usa: esa página se lee de la imagen, como cualquier escaneo. Un mismo PDF puede tener páginas de los dos tipos.
+  encabezado puede estar solo en la primera página. Un nombre que sigue en un segundo renglón queda entero: un renglón
+  sin número ni documento va con la fila de arriba o de abajo, la que esté más cerca; si las dos están casi igual de
+  cerca, la fila queda para revisar. Un renglón sin números lejos de las filas, como «Firma del presidente de mesa» al
+  pie, no es una persona. Una página girada por el PDF, como la guarda un visor después de girarla, se lee derecha.
+- **Lo que el PDF no muestra no se usa.** El texto invisible que algunos escáneres agregan sobre la imagen, el texto
+  blanco, el que es solo un recorte y el que queda tapado por una imagen no se leen. Una página cubierta por una
+  imagen es un escaneo y se lee de la imagen, aunque tenga encima un sello con texto, como «Copia fiel 05/11/2026»;
+  su texto solo se usa si nombra las columnas en su propio encabezado. Un mismo PDF puede tener páginas de los dos
+  tipos.
 - **Mesas.** Con una columna «Mesa», o un título como «Mesa Nº 12» arriba de la tabla, cada persona queda en su mesa y
   el archivo `.padron` trae una unidad por mesa. El título vale para toda la página; en un PDF con texto, un renglón que
-  dice solo «Mesa 13» entre las filas empieza otra mesa. Una página sin título propio no toma la mesa de la anterior: un
-  título mal leído no puede mandar a nadie a otra mesa.
+  dice solo «Mesa 13» entre las filas empieza otra mesa, y la mesa sigue en la página siguiente hasta el próximo
+  renglón así. Una página escaneada sin título propio no toma la mesa de la anterior: un título mal leído no puede
+  mandar a nadie a otra mesa. Si en el padrón hay mesas, quien queda sin mesa queda para revisar.
 - **Fotos** en JPG, PNG o TIFF; un TIFF de varias páginas se lee página por página. Cada imagen se lleva al tamaño de
   una hoja A4 a 300 dpi, suponiendo que la hoja ocupa toda la foto. En una foto de celular empareja la luz y endereza
   hasta 3 grados, pero no corrige la perspectiva: anda mejor con la hoja plana, bien iluminada, sin sombras, sacada de
-  frente y ocupando toda la foto.
+  frente y ocupando toda la foto. Un PNG con el fondo transparente se lee sobre papel blanco. Una imagen puede tener
+  hasta 120 millones de píxeles (una foto de 108 megapíxeles, o una hoja escaneada a 1000 dpi): el tamaño se lee de
+  los primeros bytes del archivo, antes de abrirla, y una más grande no se abre.
 
 En los padrones que no son de la facultad acepta además nombres sin coma («PRUEBA ANA»), el tipo antes del documento
 («DNI 99.123.456»), legajos con otra forma (como 12345 o 12345/6) y cualquier palabra como estado. Los legajos con la
 forma de la facultad siguen pasando por su dígito verificador. Una fila queda para revisar si un valor no tiene su forma
-o si el modelo no estaba seguro al leerlo; lo que sale del texto de un PDF, solo por lo primero.
+o si el modelo no estaba seguro al leerlo; lo que sale del texto de un PDF, solo por lo primero o porque no está claro
+de qué fila es un renglón. En un padrón con mesas, también si la fila quedó sin mesa.
 
 **Todavía no lee** letra manuscrita, ni tablas sin un encabezado que reconozca y sin líneas: un listado de nombres sin
 títulos, o un escaneo sin líneas. Tampoco lee con una IA externa, con tu propia clave o con un servicio gratis: todavía
