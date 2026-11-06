@@ -18,7 +18,7 @@ import pypdfium2 as pdfium
 import pypdfium2.raw as pdfium_c
 
 from .errors import RollError
-from .headers import Header, recognise, split_labels
+from .headers import Header, mesa_in, recognise, split_labels
 from .pdf import PDFIUM_LOCK, TARGET_DPI
 from .table import BY_HEADER, PageReading, Row, is_person, join_name
 
@@ -209,6 +209,10 @@ def _column_of(left: float, right: float, spans: tuple[tuple[float, float, str |
     return min(range(len(spans)), key=lambda i: (_distance(left, right, spans[i]), i))
 
 
+def _text(line: list[Word]) -> str:
+    return " ".join(word.text for word in line)
+
+
 def _cells(line: list[Word]) -> list[list[Word]]:
     """The words of a line in cells: words close together are one cell."""
     cells: list[list[Word]] = [[line[0]]] if line else []
@@ -295,13 +299,21 @@ def read_text_page(text: TextPage, page: int, columns: TextColumns | None = None
     left = min(span[0] for span in chosen.spans)
     right = max(span[1] for span in chosen.spans)
     fields = chosen.header.fields()
+    # A title such as «Mesa Nº 12» above the header gives its table to the page. A line with only such a
+    # title, among the rows, starts another table: a listing sorted by table often has one before each.
+    above = lines[: start - 1] if own is not None else []
+    table = next((found for found in (mesa_in(_text(line)) for line in above) if found), None)
     rows = []
     for line, values in zip(lines[start:], cells_of(lines[start:], chosen)):
+        if len(_cells(line)) == 1 and mesa_in(_text(line)):
+            table = mesa_in(_text(line))
+            continue
         row = Row(page=page, position=len(rows), raw=values, layout=BY_HEADER, columns=fields, source="text")
         join_name(row)
         row.confidence = {key: 1.0 for key in row.raw}
         if not is_person(row):
             continue
+        row.title_table = table
         top = min(word.top for word in line)
         bottom = max(word.bottom for word in line)
         margin = 0.3 * statistics.median(word.size for word in line)

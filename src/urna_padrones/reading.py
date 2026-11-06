@@ -127,6 +127,10 @@ class RollReading:
     # Pages read from their text instead of their picture, counted from 0.
     pages_with_text: list[int] = field(default_factory=list)
 
+    def tables(self) -> list[str]:
+        """The tables the people are at, in the order the roll first lists them."""
+        return list(dict.fromkeys(row.values["table"] for row in self.rows if row.values.get("table")))
+
     def records(self) -> list[dict]:
         """The rows as the dicts the command line writes, one JSONL line each, and padron_bytes takes."""
         return [row.record() for row in self.rows]
@@ -294,6 +298,8 @@ def _finish(rows: list[Row]) -> list[ReadRow]:
             if column in row.columns:
                 extra = row.checked(column)
                 values[column], valid[column] = extra.value, extra.valid
+        if values.get("table") is None and row.title_table:
+            values["table"] = row.title_table
         box = None
         if row.band is not None:
             top, bottom, left, right = row.band

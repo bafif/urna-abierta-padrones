@@ -1,4 +1,7 @@
-"""Writes the open roll format: a ZIP with manifest.json and electors.jsonl. See docs/formato-padron.md."""
+"""Writes the open roll format: a ZIP with manifest.json, electors.jsonl and, for a roll with tables, units.jsonl.
+
+See docs/formato-padron.md.
+"""
 
 import io
 import json
@@ -25,6 +28,11 @@ def order_number(value) -> int | None:
     return number if number >= 1 else None
 
 
+def unit_id(table: str) -> str:
+    """The id of the unit for a table: «12» is mesa-12."""
+    return "mesa-" + (re.sub(r"[^a-z0-9]+", "-", fold(str(table))).strip("-") or "sin-numero")
+
+
 def elector_from(record: dict, index: int) -> dict:
     """One row of the extraction as a person of the roll. Whatever doubt it had is kept for a person to review."""
     document = record.get("document") if record.get("valid", {}).get("document") else None
@@ -37,6 +45,12 @@ def elector_from(record: dict, index: int) -> dict:
     # The same person keeps the same id when a corrected roll is loaded again.
     identity = f"d-{document}" if document else f"l-{file_number}" if file_number else f"f-{index + 1}"
     elector: dict = {"id": identity, "full_name": record.get("name") or "(sin leer)", "identifiers": identifiers}
+    # A table read wrong is left out, like a bad order: the row is marked for review anyway.
+    table = record.get("table") if record.get("valid", {}).get("table", True) else None
+    if table:
+        elector["table"] = unit_id(table)
+    if record.get("address"):
+        elector["address"] = str(record["address"])
     order = order_number(record.get("order"))
     if order is not None:
         elector["order"] = order
@@ -85,7 +99,12 @@ def electors_from(records: list[dict]) -> list[dict]:
 
 
 def _summary(electors: list[dict]) -> dict:
-    return {"people": len(electors), "to_review": sum(e["review"]["status"] == "pending" for e in electors)}
+    """How many people and how many to review, and how many tables when the roll has them."""
+    summary = {"people": len(electors), "to_review": sum(e["review"]["status"] == "pending" for e in electors)}
+    tables = len(units_from(electors))
+    if tables:
+        summary["tables"] = tables
+    return summary
 
 
 def padron_summary(records: list[dict]) -> dict:
@@ -104,11 +123,25 @@ def padron_bytes(records: list[dict], title: str | None = None) -> bytes:
     has neither a valid document nor a valid file number, when its order is not a number from 1
     up (it is then left out), or when its id repeats an earlier one with another name. A later row
     with the same id and the same name is the same person in another program and is left out.
+
+    A record with a "table" puts its person at that table, and the file gets one unit per table. A
+    record with an "address" keeps it.
     """
     return _archive(electors_from(records), title)
 
 
+def units_from(electors: list[dict]) -> list[dict]:
+    """One unit for each table the people have, in the order the roll first lists it."""
+    units: dict[str, dict] = {}
+    for elector in electors:
+        table = elector.get("table")
+        if table and table not in units:
+            units[table] = {"id": table, "level": "mesa", "name": "Mesa " + table.removeprefix("mesa-")}
+    return list(units.values())
+
+
 def _archive(electors: list[dict], title: str | None) -> bytes:
+    units = units_from(electors)
     manifest = {
         "format": "padron-abierto",
         "format_version": FORMAT_VERSION,
@@ -119,9 +152,14 @@ def _archive(electors: list[dict], title: str | None) -> bytes:
     }
     if title:
         manifest["title"] = title
+    if units:
+        manifest["levels"] = ["mesa"]
+        manifest["files"]["units"] = {"path": "units.jsonl", "count": len(units)}
     buffer = io.BytesIO()
     with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
         archive.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False, indent=1))
+        if units:
+            archive.writestr("units.jsonl", "".join(json.dumps(u, ensure_ascii=False) + "\n" for u in units))
         archive.writestr("electors.jsonl", "".join(json.dumps(e, ensure_ascii=False) + "\n" for e in electors))
     return buffer.getvalue()
 

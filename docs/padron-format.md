@@ -59,7 +59,7 @@ Only `id` and `full_name` are required.
 
 - **`id`** has to stay the same if the roll is generated again, so that a correction loses nothing already marked. The recommended
   form is `d-<document>` and, with no document, `l-<file number>` or `f-<row>`.
-- **`table`** is the `id` of a unit. If missing, the app proposes tables.
+- **`table`** is the `id` of a unit: if the file has `units.jsonl`, it has to be there. If missing, the app proposes tables.
 - **`order`** is the number in the printed roll, starting at 1.
 - **`review.status`** is `pending` if something stayed in doubt. A doubtful row gets marked and shown for review. **It is never dropped.**
 
@@ -68,6 +68,8 @@ Only `id` and `full_name` are required.
 ```json
 { "id": "mesa-12", "level": "mesa", "name": "Mesa 12", "parent": null, "declared_total": 350 }
 ```
+
+Only `id` and `name` are required. `declared_total` is how many people the printed roll says the unit has, if it says so.
 
 ## Compatibility
 

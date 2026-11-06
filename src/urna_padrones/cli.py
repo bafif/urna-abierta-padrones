@@ -55,6 +55,8 @@ def extract(args: argparse.Namespace) -> int:
                f"números de orden inferidos: {reading.inferred_orders}")
     if reading.pages_with_text:
         summary += f"; páginas con texto: {len(reading.pages_with_text)}"
+    if reading.tables():
+        summary += f"; mesas: {len(reading.tables())}"
     print(summary)
     return 0
 
@@ -64,7 +66,8 @@ def to_padron(args: argparse.Namespace) -> int:
         print("El padrón tiene datos personales y queda dentro de un repo de git: elegí otra carpeta.", file=sys.stderr)
         return 2
     summary = write_padron(quality.load_records(args.records), args.out, args.title)
-    print(f"{summary['people']} personas; {summary['to_review']} para revisar")
+    tables = f"; {summary['tables']} mesas" if summary.get("tables") else ""
+    print(f"{summary['people']} personas; {summary['to_review']} para revisar{tables}")
     return 0
 
 

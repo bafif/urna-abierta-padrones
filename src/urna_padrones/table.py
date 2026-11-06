@@ -14,7 +14,7 @@ import numpy as np
 
 from . import fields
 from .grid import Grid, find_grid, straighten
-from .headers import Header, recognise
+from .headers import Header, mesa_in, recognise
 from .ocr import read_cell
 
 COLUMNS = ("order", "name", "program", "file_number", "document", "status")
@@ -50,6 +50,11 @@ CONFIDENCE_CHECKED = ("name", "document", "file_number")
 # The header is looked for in the first rows of the table: a title may come before it, or the header may
 # take two lines.
 HEADER_ROWS = 3
+# A title above the table is looked for in its last lines, of a height text can have.
+TITLE_LINES = 4
+TITLE_HEIGHT = (12, 160)
+# Words of a title further apart than this, in pixels, are read separately.
+TITLE_GAP = 80
 
 
 def cleaner(column: str, layout: str = FACULTY) -> Callable[[str], fields.Checked]:
@@ -72,6 +77,8 @@ class Row:
     columns: tuple[str, ...] = COLUMNS
     # "ocr" when the values were read from an image, "text" when they are the text of a PDF, exact.
     source: str = "ocr"
+    # The table a title such as «Mesa 12» gives to the whole page, for a row without a table of its own.
+    title_table: str | None = None
 
     def checked(self, column: str) -> fields.Checked:
         return cleaner(column, self.layout)(self.raw.get(column, ""))
@@ -206,6 +213,34 @@ def find_header(clean: np.ndarray, grid: Grid, checkpoint: Callable[[], None]) -
     return None, -1
 
 
+def title_table(image: np.ndarray, top: int, checkpoint: Callable[[], None]) -> str | None:
+    """The table a title above the table gives to the whole page, such as «Mesa Nº 12», or None.
+
+    The last lines above the table are read, each in stretches split where the words are far apart.
+    """
+    region = image[: max(0, top - 8)]
+    if region.size == 0:
+        return None
+    ink = region < 128
+    on = np.where(ink.sum(axis=1) >= 3)[0]
+    if on.size == 0:
+        return None
+    bands = [(int(g[0]), int(g[-1]) + 1) for g in np.split(on, np.where(np.diff(on) > 2)[0] + 1)]
+    bands = [(a, b) for a, b in bands if TITLE_HEIGHT[0] <= b - a <= TITLE_HEIGHT[1]][-TITLE_LINES:]
+    for start, stop in bands:
+        checkpoint()
+        columns = np.where(ink[start:stop].any(axis=0))[0]
+        pieces = np.split(columns, np.where(np.diff(columns) > TITLE_GAP)[0] + 1)
+        texts = []
+        for piece in pieces:
+            crop = region[max(0, start - 4) : stop + 4, max(0, piece[0] - 6) : piece[-1] + 7]
+            texts.append(read_cell(crop)[0])
+        found = mesa_in(" ".join(texts))
+        if found:
+            return found
+    return None
+
+
 def infer_orders(rows: list[Row]) -> int:
     """Fix numbers that disagree with both neighbours, since numbering is consecutive.
 
@@ -281,7 +316,7 @@ def read_page(
     checkpoint: Callable[[], None] | None = None,
     header: Header | None = None,
 ) -> PageReading:
-    """Read the rows of one scanned page.
+    """Read the rows of one scanned page, and the table its title gives them, if any.
 
     The page's own header says which column holds what. Without one, `header` (from another page of the
     same roll) does, and without either the page is read as the faculty's layout. A header that puts
@@ -297,9 +332,14 @@ def read_page(
     own, start = (None, -1) if header is not None else find_header(clean, grid, checkpoint)
     chosen = header or own
     if chosen is None or (own is not None and fits_faculty(own) and select_separators(grid.columns) is not None):
-        return PageReading(_faculty_rows(straight, clean, grid, page, angle, checkpoint), separators=len(grid.columns))
-    rows = _header_rows(straight, clean, grid, chosen, start + 1, page, angle, checkpoint)
-    return PageReading(rows, header=own, separators=len(grid.columns))
+        rows, found = _faculty_rows(straight, clean, grid, page, angle, checkpoint), None
+    else:
+        rows, found = _header_rows(straight, clean, grid, chosen, start + 1, page, angle, checkpoint), own
+    if rows and grid.rows:
+        mesa = title_table(clean, grid.rows[0][0], checkpoint)
+        for row in rows:
+            row.title_table = mesa
+    return PageReading(rows, header=found, separators=len(grid.columns))
 
 
 def extract_page(gray: np.ndarray, page: int, checkpoint: Callable[[], None] | None = None) -> list[Row]:
