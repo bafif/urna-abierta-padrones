@@ -10,11 +10,18 @@ env:
 
 jobs:
   tests:
-    runs-on: ubuntu-24.04
+    # The reader is built for the three: its tests run on the three too.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      # The scans of invented people are drawn with Liberation Sans: without it those tests are skipped.
-      - run: sudo apt-get update && sudo apt-get install -y --no-install-recommends fonts-liberation
+      # The scans of invented people are drawn with Liberation Sans. Where fontconfig cannot find it, as on Windows
+      # and macOS, the tests that need it are skipped and the others draw with Arial.
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends fonts-liberation
       - uses: astral-sh/setup-uv@v6
       - run: uv python install
       - run: uv sync --locked
