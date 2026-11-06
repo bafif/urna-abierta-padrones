@@ -6,7 +6,9 @@ Turns voter rolls in any format into the open format read by
 Urna Abierta. It can be used on its own, without the app.
 
 **Everything runs on your computer.** A roll holds names and identity documents of real people, so text recognition is
-local by default, and no roll ever goes through an account or a server of the project.
+local by default, and no roll ever goes through an account or a server of the project. Only if you ask for it from the
+terminal, with your own key, is it read by an external AI service: see
+[With your own AI](#with-your-own-ai-from-the-terminal).
 
 ## Status
 
@@ -62,8 +64,10 @@ its shape or the model was not sure when reading it; what comes from the text of
 it is not clear which row a line belongs to. In a roll with tables, also if the row was left without one.
 
 **It does not read yet** handwriting, or tables without a header it recognises and without ruling: a list of names
-without titles, or a scan without lines. Nor does it read with an external AI, with your own key or a free service: that
-is not available yet, everything is read with the local model and the `.padron` file says no external AI saw the data.
+without titles, or a scan without lines. Nor does the reader read with an external AI: with your own key it can be done
+only from the terminal (see [With your own AI](#with-your-own-ai-from-the-terminal)), and the free service it will offer
+has not been chosen yet. What the reader reads is read with the local model, and the `.padron` file says no external AI
+saw the data.
 
 ## Without a terminal: the roll reader
 
@@ -180,7 +184,8 @@ uv run urna-padrones verify ~/private/roll.jsonl ~/private/spreadsheet.xlsx --fi
 - `extract` takes a PDF or a JPG, PNG or TIFF image. It saves the data with permissions for your user only, and refuses
   to write it inside a git repository. In a terminal it shows which page it is on. `--pages N` reads only the first N
   pages and `--workers N`, how many at a time. When it ends it says how many rows it read, how many pages had no table
-  and, if there are any, how many it read from their text and how many tables it found.
+  and, if there are any, how many it read from their text and how many tables it found. With `--ia` it reads with an
+  external service (see below).
 - `report`, `crosscheck` and `verify` print counts only, never data about a person. `report` compares with the
   numbering of the roll to warn if anyone is missing.
 - `crosscheck` compares two rolls that share people. Since their reading errors are independent, it measures quality
@@ -196,6 +201,57 @@ uv run urna-padrones verify ~/private/roll.jsonl ~/private/spreadsheet.xlsx --fi
 In the faculty's student numbers, the digit after the slash is a check digit (modulo 11, with weights 2 to 7 from the
 right; 10 or 11 is written as 1). The reader flags a four-digit student number that does not match it: it is almost
 always a misread digit.
+
+## With your own AI (from the terminal)
+
+Instead of the local model, `extract` can send the pages to an AI service, with a key of your own. It helps when the
+local model reads a roll badly, but the roll leaves your computer: read this first.
+
+- `--ia mistral` uses Mistral OCR, by Mistral AI, at its European address (`https://api.eu.mistral.ai`), with the model
+  `mistral-ocr-latest` unless you name another with `--ia-modelo`. It returns each page as text with tables, and each
+  table is read by the names in its header, like a scan.
+- `--ia openai-compatible --ia-url <address> --ia-modelo <model>` uses any service that answers like OpenAI's chat API
+  and takes images, such as OVHcloud AI Endpoints, Scaleway or OpenAI. The address is the base of the API, such as
+  `https://api.example.com/v1`. It is asked for strict JSON, one object per person (order number, name, document,
+  student number, program, status, table and address), which is checked before it is used. A model server on your own
+  computer works too: it is the only one that may use `http://`; the others have to use `https://`.
+
+The key goes in the variable `URNA_PADRONES_IA_CLAVE`, never as an argument, so that it does not stay in the terminal's
+history. To type it without it being shown or saved, in bash or zsh:
+`read -rs URNA_PADRONES_IA_CLAVE && export URNA_PADRONES_IA_CLAVE`; in fish: `read -sx URNA_PADRONES_IA_CLAVE`.
+
+```sh
+uv run urna-padrones extract roll.pdf --out ~/private/roll.jsonl --ia mistral --acepto-enviar
+```
+
+Without `--acepto-enviar`, it shows a warning and sends nothing. Without `--ia`, nothing changes and nothing leaves your
+computer.
+
+**What is sent, and to whom.** The pictures of the pages read from their picture go, one per request, straight from
+your computer to the service, with your key: they go through no server of the project. Each picture is a JPEG made
+again from the page: the PDF never goes, nor the pages that are not read (with `--pages N`, only the first N go), nor
+what a photo carries besides the picture, such as where it was taken. The pages of a PDF with text are read from their
+text and are not sent. Those pictures hold the names and documents of the people, and the company behind the service
+handles them under its terms, not this project's. The program follows no redirects: the key and the pages go only to
+the address you chose. The service charges whatever it charges per page, under your plan.
+
+**What to check in the service's terms**, before sending a roll: whether it uses what you send to train its models and
+how to turn that off, how long it keeps it, in which country it processes and stores it, and whether your plan includes
+a data processing agreement. It depends on the service and the plan, and it may change: the program does not check it.
+
+**What comes back.** Every value goes through the same cleaning and review rules as what the local model reads: a row
+is left for review if a value does not have its form. The service does not say how sure it is, so a row read by the AI
+never counts as surer than that, and its order numbers are corrected by their neighbours like a scan's. Each request
+waits up to 120 seconds and is tried up to 3 times if the service is busy, fails, does not answer or answers something
+other than what was asked. A refused key or a quota that ran out is said at once. If a page cannot be read, `extract`
+stops, says why and writes nothing.
+
+**The `.padron` file says so.** Each row of the extraction carries `external_ai` with the service and the model, and
+`padron` writes `extraction.external_ai: true` and `extraction.provider` into the file (see the
+[format](docs/padron-format.md)). Depending on the election's security level, the app may refuse a roll read this way.
+
+**Not yet**: it is not in the reader's screens, and the free service the reader will offer has not been chosen yet. The
+tests use a fake service on the same computer; it has not been tried with the real services yet.
 
 ## Tests
 

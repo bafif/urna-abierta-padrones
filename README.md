@@ -6,7 +6,9 @@ Convierte padrones en cualquier formato al formato abierto que lee Urna Abierta.
 Se puede usar solo, sin la app.
 
 **Todo corre en tu computadora.** Un padrón trae nombres y documentos de personas, así que el reconocimiento de texto es
-local por defecto, y ningún padrón pasa por una cuenta ni un servidor del proyecto.
+local por defecto, y ningún padrón pasa por una cuenta ni un servidor del proyecto. Solo si lo pedís desde la terminal,
+con tu propia clave, se lee con un servicio de IA externo: ver
+[Con tu propia IA](#con-tu-propia-ia-desde-la-terminal).
 
 ## Estado
 
@@ -62,8 +64,10 @@ o si el modelo no estaba seguro al leerlo; lo que sale del texto de un PDF, solo
 de qué fila es un renglón. En un padrón con mesas, también si la fila quedó sin mesa.
 
 **Todavía no lee** letra manuscrita, ni tablas sin un encabezado que reconozca y sin líneas: un listado de nombres sin
-títulos, o un escaneo sin líneas. Tampoco lee con una IA externa, con tu propia clave o con un servicio gratis: todavía
-no está disponible, todo se lee con el modelo local y el archivo `.padron` dice que ninguna IA externa vio los datos.
+títulos, o un escaneo sin líneas. El lector tampoco lee con una IA externa: con tu propia clave se puede solo desde la
+terminal (ver [Con tu propia IA](#con-tu-propia-ia-desde-la-terminal)), y el servicio gratis que va a ofrecer todavía no
+está elegido. Lo que lee el lector se lee con el modelo local, y el archivo `.padron` dice que ninguna IA externa vio
+los datos.
 
 ## Sin terminal: el lector de padrones
 
@@ -182,7 +186,7 @@ uv run urna-padrones verify ~/privado/padron.jsonl ~/privado/planilla.xlsx --fil
 - `extract` toma un PDF o una imagen JPG, PNG o TIFF. Guarda los datos con permisos solo para tu usuario, y se niega a
   escribirlos dentro de un repo de git. En una terminal muestra por qué página va. `--pages N` lee solo las primeras N
   páginas y `--workers N`, cuántas a la vez. Al terminar dice cuántas filas leyó, cuántas páginas no tenían tabla y, si
-  las hay, cuántas leyó de su texto y cuántas mesas encontró.
+  las hay, cuántas leyó de su texto y cuántas mesas encontró. Con `--ia` lee con un servicio externo (ver abajo).
 - `report`, `crosscheck` y `verify` muestran solo cantidades, nunca datos de una persona. `report` compara con la
   numeración del padrón para avisar si falta alguien.
 - `crosscheck` compara dos padrones que comparten gente. Como sus errores de lectura son independientes, sirve para medir
@@ -197,6 +201,56 @@ uv run urna-padrones verify ~/privado/padron.jsonl ~/privado/planilla.xlsx --fil
 En los legajos de la facultad, el número después de la barra es un dígito verificador (módulo 11, con pesos de 2 a 7
 desde la derecha; si da 10 u 11 se escribe 1). El lector marca para revisar un legajo de cuatro números que no lo
 cumple: casi siempre es un número mal leído.
+
+## Con tu propia IA (desde la terminal)
+
+En vez del modelo local, `extract` puede mandar las páginas a un servicio de IA, con una clave tuya. Sirve cuando el
+modelo local lee mal un padrón, pero el padrón sale de tu computadora: leé esto antes.
+
+- `--ia mistral` usa Mistral OCR, de Mistral AI, en su dirección europea (`https://api.eu.mistral.ai`), con el modelo
+  `mistral-ocr-latest` si no decís otro con `--ia-modelo`. Devuelve cada página como texto con tablas, y cada tabla se
+  lee por los nombres de su encabezado, como un escaneo.
+- `--ia openai-compatible --ia-url <dirección> --ia-modelo <modelo>` usa cualquier servicio que conteste como la API de
+  chat de OpenAI y acepte imágenes, como OVHcloud AI Endpoints, Scaleway u OpenAI. La dirección es la base de la API,
+  como `https://api.ejemplo.com/v1`. Se le pide un JSON estricto, un objeto por persona (número de orden, nombre,
+  documento, legajo, carrera, estado, mesa y domicilio), y se comprueba antes de usarlo. También sirve un servidor de
+  modelos en tu misma computadora: es el único que puede usar `http://`; los demás tienen que usar `https://`.
+
+La clave va en la variable `URNA_PADRONES_IA_CLAVE`, nunca como argumento, para que no quede en el historial de la
+terminal. Para escribirla sin que se vea ni quede guardada, en bash o zsh:
+`read -rs URNA_PADRONES_IA_CLAVE && export URNA_PADRONES_IA_CLAVE`; en fish: `read -sx URNA_PADRONES_IA_CLAVE`.
+
+```sh
+uv run urna-padrones extract padron.pdf --out ~/privado/padron.jsonl --ia mistral --acepto-enviar
+```
+
+Sin `--acepto-enviar`, muestra un aviso y no manda nada. Sin `--ia`, nada cambia y nada sale de tu computadora.
+
+**Qué se manda y a quién.** Van las imágenes de las páginas que se leen de su imagen, una por pedido, directo de tu
+computadora al servicio, con tu clave: no pasan por ningún servidor del proyecto. Cada imagen es un JPEG armado de nuevo
+desde la página: nunca va el PDF, ni las páginas que no se leen (con `--pages N`, solo van las primeras N), ni lo que
+trae una foto además de la imagen, como el lugar donde se sacó. Las páginas de un PDF con texto se leen de su texto y no
+se mandan. Esas imágenes tienen los nombres y los documentos de las personas, y la empresa del servicio los trata según
+sus condiciones, no las de este proyecto. El programa no sigue redirecciones: la clave y las páginas van solo a la
+dirección que elegiste. El servicio te cobra lo que cobre por página, según tu plan.
+
+**Qué mirar en las condiciones del servicio**, antes de mandar un padrón: si usa lo que le mandás para entrenar sus
+modelos y cómo se apaga eso, cuánto tiempo lo guarda, en qué país lo procesa y lo guarda, y si tu plan incluye un acuerdo
+de tratamiento de datos. Depende del servicio y del plan, y puede cambiar: el programa no lo comprueba.
+
+**Qué vuelve.** Cada valor pasa por las mismas limpiezas y reglas de revisión que lo leído con el modelo local: una fila
+queda para revisar si un valor no tiene su forma. El servicio no dice qué tan seguro está, así que una fila leída por la
+IA nunca cuenta como más segura que eso, y sus números de orden se corrigen por los vecinos como los de un escaneo. Cada
+pedido espera hasta 120 segundos y se intenta hasta 3 veces si el servicio está ocupado, falla, no contesta o contesta
+algo que no es lo pedido. Una clave rechazada o una cuota terminada se dicen enseguida. Si una página no se puede leer,
+`extract` para, dice por qué y no escribe nada.
+
+**El archivo `.padron` lo dice.** Cada fila de la extracción lleva `external_ai` con el servicio y el modelo, y `padron`
+escribe en el archivo `extraction.external_ai: true` y `extraction.provider` (ver el [formato](docs/formato-padron.md)).
+Según el nivel de seguridad de la elección, la app puede no aceptar un padrón leído así.
+
+**Todavía no**: no está en las pantallas del lector, y el servicio gratis que va a ofrecer el lector todavía no está
+elegido. Las pruebas usan un servicio falso en la misma computadora; con los servicios reales todavía no se probó.
 
 ## Pruebas
 
