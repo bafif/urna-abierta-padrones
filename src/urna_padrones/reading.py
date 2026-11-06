@@ -25,6 +25,7 @@ from .errors import MESSAGES, RollError
 from .grid import rotate
 from .pages import check_roll, kind_of, render
 from .pdf import TARGET_DPI
+from .headers import Header
 from .table import (
     COLUMNS,
     EXTRA,
@@ -204,7 +205,13 @@ def _text_columns(path: Path, count: int) -> TextColumns | None:
 
 
 def _read_one(
-    path: Path, kind: str, index: int, checkpoint: Callable[[], None], columns: TextColumns | None = None
+    path: Path,
+    kind: str,
+    index: int,
+    checkpoint: Callable[[], None],
+    columns: TextColumns | None = None,
+    lend: Callable[[dict[int, Header] | None], None] | None = None,
+    borrow: Callable[[], dict[int, Header] | None] | None = None,
 ) -> PageReading:
     """One page: from its text when it or `columns` gives a header, from its picture otherwise."""
     text = page_text(path, index) if kind == "pdf" else None
@@ -213,7 +220,8 @@ def _read_one(
         if reading.rows:
             return reading
     checkpoint()
-    reading = read_page(render(path, index), index, checkpoint=checkpoint, photo=kind == "image")
+    image = render(path, index)
+    reading = read_page(image, index, checkpoint=checkpoint, photo=kind == "image", lend=lend, borrow=borrow)
     reading.has_text = text is not None
     return reading
 
@@ -269,12 +277,22 @@ def _read_pages(
         if stop.is_set():
             raise RollError("cancelled")
 
+    # The first page lends its header to the scanned pages without one, which then are read once, instead of
+    # as the faculty's layout first and again afterwards. They wait for it only if they get that far before it.
+    lent = _Lent()
+
     def read(index: int) -> PageReading:
         checkpoint()
-        return _read_one(path, kind, index, checkpoint, columns)
+        if index:
+            return _read_one(path, kind, index, checkpoint, columns, borrow=lambda: lent.take(checkpoint))
+        try:
+            return _read_one(path, kind, index, checkpoint, columns, lend=lent.give)
+        finally:
+            lent.give(None)
 
     results: list[PageReading] = [PageReading([]) for _ in range(count)]
     pool = ThreadPoolExecutor(max_workers=min(workers, count), thread_name_prefix="urna-padrones")
+    # Submitted in order: the first page always starts before or with the others, even with one worker.
     futures = {pool.submit(read, index): index for index in range(count)}
     pending = set(futures)
     done_count = 0
@@ -298,6 +316,24 @@ def _read_pages(
         stop.set()
         pool.shutdown(wait=True, cancel_futures=True)
     return results
+
+
+class _Lent:
+    """What the first page lends to the others, given once, and waited for by those that need it."""
+
+    def __init__(self) -> None:
+        self._given = threading.Event()
+        self._value: dict[int, Header] | None = None
+
+    def give(self, value: dict[int, Header] | None) -> None:
+        if not self._given.is_set():
+            self._value = value
+            self._given.set()
+
+    def take(self, checkpoint: Callable[[], None]) -> dict[int, Header] | None:
+        while not self._given.wait(POLL_SECONDS):
+            checkpoint()
+        return self._value
 
 
 def _finish(rows: list[Row]) -> list[ReadRow]:

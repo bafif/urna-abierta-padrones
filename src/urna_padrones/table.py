@@ -100,7 +100,7 @@ class PageReading:
     """What one page gave: its people, and what a page of the same roll without a header can take from it."""
 
     rows: list[Row]
-    # The header the page has, unless it is the faculty's layout, which needs no header.
+    # The header the page was read by, its own or another page's, unless it was the faculty's layout.
     header: Header | None = None
     # How many column lines its table has: a page without a header takes only a header with as many columns.
     separators: int = 0
@@ -322,11 +322,16 @@ def read_page(
     checkpoint: Callable[[], None] | None = None,
     header: Header | None = None,
     photo: bool = False,
+    lend: Callable[[dict[int, Header] | None], None] | None = None,
+    borrow: Callable[[], dict[int, Header] | None] | None = None,
 ) -> PageReading:
     """Read the rows of one scanned page, and the table its title gives them, if any.
 
-    The page's own header says which column holds what. Without one, `header` (from another page of the
-    same roll) does, and without either the page is read as the faculty's layout. A header that puts
+    The page's own header says which column holds what. `header`, from another page of the same roll, is
+    used instead of looking for one. A page without either asks `borrow` for the headers another page lends,
+    by how many column lines their table has, and takes the one for a table like its own; without that it is
+    read as the faculty's layout. `lend`, as soon as the header is known, gets this page's header to lend,
+    or None when it has none or it is the faculty's layout. A header that puts
     every column it names where the faculty's layout has it is read as that layout too, so those rolls
     give exactly what they gave before. A `photo` has its light evened out first. `checkpoint` runs
     before each step of the page and before each row: raising from it abandons the page.
@@ -339,11 +344,16 @@ def read_page(
     checkpoint()
     grid, clean = find_grid(straight)
     own, start = (None, -1) if header is not None else find_header(clean, grid, checkpoint)
+    faculty = own is not None and fits_faculty(own) and select_separators(grid.columns) is not None
+    if lend is not None:
+        lend({len(grid.columns): own} if own is not None and not faculty else None)
     chosen = header or own
-    if chosen is None or (own is not None and fits_faculty(own) and select_separators(grid.columns) is not None):
+    if chosen is None and borrow is not None:
+        chosen = (borrow() or {}).get(len(grid.columns))
+    if chosen is None or faculty:
         rows, found = _faculty_rows(straight, clean, grid, page, angle, checkpoint), None
     else:
-        rows, found = _header_rows(straight, clean, grid, chosen, start + 1, page, angle, checkpoint), own
+        rows, found = _header_rows(straight, clean, grid, chosen, start + 1, page, angle, checkpoint), chosen
     if rows and grid.rows:
         mesa = title_table(clean, grid.rows[0][0], checkpoint)
         for row in rows:
