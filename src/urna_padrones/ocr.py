@@ -29,6 +29,10 @@ from rapidocr.utils.process_img import ResizeImgError
 if hasattr(onnxruntime, "disable_telemetry_events"):
     onnxruntime.disable_telemetry_events()
 
+# Its warnings speak of things nobody reading a roll can fix, like the devices of a virtual machine: only its errors
+# are worth a line in the terminal.
+onnxruntime.set_default_logger_severity(3)
+
 MODEL_VARIABLE = "URNA_PADRONES_MODELO"
 BUNDLED_MODEL = "PP-OCRv6_rec_small.onnx"
 # A small image of invented cells, one above the other, made by tests/make_ocr_sample.py.

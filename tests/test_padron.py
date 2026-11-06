@@ -1,5 +1,6 @@
 import io
 import json
+import os
 import stat
 import zipfile
 
@@ -67,7 +68,9 @@ def test_the_file_says_how_many_people_it_has_and_only_its_owner_can_read_it(tmp
     out = tmp_path / "prueba.padron"
     summary = write_padron([record(), record(document="99000002", needs_review=True)], out, title="Prueba")
     assert summary == {"people": 2, "to_review": 1}
-    assert stat.S_IMODE(out.stat().st_mode) == 0o600
+    # Windows has no such permission bits: the file stays in the person's own profile there.
+    if os.name == "posix":
+        assert stat.S_IMODE(out.stat().st_mode) == 0o600
     manifest, electors = read(out)
     assert manifest["format"] == "padron-abierto"
     assert manifest["extraction"]["external_ai"] is False

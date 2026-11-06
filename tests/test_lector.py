@@ -336,7 +336,10 @@ def test_quit_deletes_the_private_folder(tmp_path, roll_pdf):
     try:
         assert upload(base, roll_pdf[0])[0] == 200
         (folder,) = private_folders(tmp_path)
-        assert (folder / PID_FILE).read_text() == str(process.pid)
+        pid = int((folder / PID_FILE).read_text())
+        # On Windows the python.exe of a virtual environment starts the real one as its child.
+        if os.name == "posix":
+            assert pid == process.pid
         assert api(base, "quit", {}) == (200, {"ok": True})
         assert process.wait(timeout=30) == 0
     finally:
@@ -397,7 +400,9 @@ def test_a_signal_deletes_the_private_folder(tmp_path, roll_pdf, signum):
     finally:
         process.kill()
     assert private_folders(tmp_path) == []
-    assert process.stderr.read() == ""
+    # onnxruntime may warn while it starts, before its level can be lowered: about the devices of a virtual machine,
+    # for example. Anything else on the error output is a fault.
+    assert [line for line in process.stderr.read().splitlines() if ":onnxruntime:" not in line] == []
 
 
 def test_it_is_idle_only_when_nothing_is_being_read(tmp_path):

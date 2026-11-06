@@ -140,8 +140,11 @@ def test_a_library_inside_python_is_listed_when_its_module_is_in_the_bundle(monk
 
 
 def test_the_notices_name_the_libraries_inside_python(tmp_path, monkeypatch):
+    import sysconfig
     import zlib
 
+    # On Windows sysconfig loads a built-in module the first time it is asked, and the patch below hides it.
+    sysconfig.get_config_vars()
     monkeypatch.setattr(sys, "builtin_module_names", ("sys", "zlib"))
     out = tmp_path / "notices"
     written = notices.write_notices(out, [], version="v1", extension_modules={"_ssl", "_decimal"})
