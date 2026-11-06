@@ -106,9 +106,31 @@ def test_a_row_a_person_confirmed_is_ok():
     assert status(padron_bytes([unusable])) == "pending"
 
 
-def test_a_repeated_document_never_drops_anyone(tmp_path):
+def test_a_repeated_document_with_another_name_never_drops_anyone(tmp_path):
     out = tmp_path / "prueba.padron"
-    summary = write_padron([record(), record()], out)
+    summary = write_padron([record(), record(name="Ejemplo, Luis")], out)
     _, electors = read(out)
     assert summary == {"people": 2, "to_review": 1}
     assert len({person["id"] for person in electors}) == 2
+    assert electors[1]["review"] == {"status": "pending"}
+
+
+def test_someone_in_two_programs_is_written_once_where_the_roll_lists_them_first(tmp_path):
+    out = tmp_path / "prueba.padron"
+    first = record(order="3", program="Civil")
+    again = record(order="41", program="Química", name="PRUEBA ANA")
+    summary = write_padron([first, again, record(document="99000002", name="Ejemplo, Luis")], out)
+    manifest, electors = read(out)
+    assert summary == {"people": 2, "to_review": 0}
+    assert manifest["files"]["electors"]["count"] == 2
+    assert (electors[0]["id"], electors[0].get("order"), electors[0]["extra"]["program"]) == ("d-99000001", 3, "Civil")
+
+
+def test_a_close_name_with_the_same_document_is_another_person():
+    # Juan and Juana, or a letter misread in one listing: both stay, the later one for review.
+    for other in ("Prueba, Juana", "Prueba, Anna"):
+        name = "Prueba, Juan" if other == "Prueba, Juana" else "Prueba, Ana"
+        summary = padron_summary([record(name=name), record(name=other)])
+        assert summary == {"people": 2, "to_review": 1}
+    # A name without letters is nobody's.
+    assert padron_summary([record(name="-"), record(name="?")])["people"] == 2

@@ -3,9 +3,13 @@
 import io
 import json
 import os
+import re
+import unicodedata
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
+
+from .fields import fold
 
 FORMAT_VERSION = "0.1.0"
 
@@ -46,16 +50,36 @@ def elector_from(record: dict, index: int) -> dict:
     return elector
 
 
+def _name_key(name: str | None) -> str:
+    """A name without case, accents or marks, with its words in order: «Prueba, Ana» and «ANA PRUEBA» are one."""
+    return " ".join(sorted(re.sub(r"[^a-z0-9]+", " ", unicodedata.normalize("NFC", fold(name or ""))).split()))
+
+
+def same_person(first: dict, second: dict) -> bool:
+    """Two people with the same id are one only when their names are the same.
+
+    A close name is not enough: Juan and Juana with one document are two people, one with a document read or typed
+    wrong. At worst the same person stays twice, marked for review; nobody is left out.
+    """
+    a = _name_key(first.get("full_name"))
+    return bool(a) and a == _name_key(second.get("full_name"))
+
+
 def electors_from(records: list[dict]) -> list[dict]:
-    seen: set[str] = set()
+    by_id: dict[str, dict] = {}
     electors = []
     for index, record in enumerate(records):
         elector = elector_from(record, index)
-        if elector["id"] in seen:
-            # A repeated document is a doubt, never a reason to drop someone.
+        earlier = by_id.get(elector["id"])
+        if earlier is not None:
+            if same_person(earlier, elector):
+                # Someone in two programs is listed once in each, but votes once, where the roll lists them first:
+                # on paper the repeats are crossed out.
+                continue
+            # The same document with another name is a doubt, never a reason to drop someone.
             elector["id"] = f"f-{index + 1}"
             elector["review"] = {"status": "pending"}
-        seen.add(elector["id"])
+        by_id[elector["id"]] = elector
         electors.append(elector)
     return electors
 
@@ -78,7 +102,8 @@ def padron_bytes(records: list[dict], title: str | None = None) -> bytes:
     row sets needs_review to false (and, if the person fixed the document or the file number,
     also its "valid" flag to true). A row stays "pending" anyway when it has no name, when it
     has neither a valid document nor a valid file number, when its order is not a number from 1
-    up (it is then left out), or when its id repeats an earlier one.
+    up (it is then left out), or when its id repeats an earlier one with another name. A later row
+    with the same id and the same name is the same person in another program and is left out.
     """
     return _archive(electors_from(records), title)
 
