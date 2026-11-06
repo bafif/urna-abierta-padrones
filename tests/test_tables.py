@@ -4,7 +4,7 @@ import io
 import json
 import zipfile
 
-from fake_layouts import draw_ruled_page, listing_page, make_listing_pdf, people
+from fake_layouts import draw_ruled_page, listing_page, make_listing_pdf, people, text_content
 from fake_roll import draw_page, fake_rows, find_font, save_pdf
 from urna_padrones import cli
 from urna_padrones.padron import elector_from, padron_bytes, units_from
@@ -76,6 +76,48 @@ def test_a_scanned_title_gives_its_table_and_the_faculty_layout_stays_as_it_was(
     assert [row.values.get("table") for row in reading.rows] == ["7"] * 8 + [None] * 8
     assert all(row.layout == "facultad" for row in reading.rows)
     assert "table" not in reading.rows[-1].record()
+    # The second page has no title of its own: it does not take the first page's table, and is left for review.
+    assert all(row.needs_review and row.valid["table"] is False for row in reading.rows[8:])
+
+
+def test_a_table_goes_on_onto_the_next_page_with_text(tmp_path):
+    """A listing sorted by table, with a «Mesa N» line before each, where Mesa 1 goes on onto the second page."""
+    path = tmp_path / "sigue.pdf"
+    drawn = people(20, seed=36)
+    keys, headers = KEYS[:3], HEADERS[:3]
+
+    def page(rows, mesas):
+        items = [(x, 90, 8.5, header) for x, header in zip(COLUMN_X, headers)]
+        y = 90 + 14 * 1.4
+        for index, person in enumerate(rows):
+            if index in mesas:
+                items.append((COLUMN_X[0], y, 9, f"Mesa {mesas[index]}"))
+                y += 14
+            items += [(x, y, 8.5, person[key]) for x, key in zip(COLUMN_X, keys)]
+            y += 14
+        return text_content(items)
+
+    make_listing_pdf(path, [page(drawn[:10], {0: 1}), page(drawn[10:], {5: 2})])
+    reading = read_roll(path)
+    assert [row.values["table"] for row in reading.rows] == ["1"] * 15 + ["2"] * 5
+    assert not any(row.needs_review for row in reading.rows)
+    _, units, electors = open_padron(padron_bytes(reading.records()))
+    assert [unit["id"] for unit in units] == ["mesa-1", "mesa-2"]
+    assert sum(elector["table"] == "mesa-1" for elector in electors) == 15
+
+
+def test_whoever_is_left_without_a_table_is_reviewed(tmp_path):
+    path = tmp_path / "sin-mesa.pdf"
+    drawn = people(6, seed=37)
+    keys, headers = KEYS[:3], HEADERS[:3]
+    first = listing_page(drawn[:3], headers, keys, COLUMN_X)
+    second = listing_page(drawn[3:], None, keys, COLUMN_X, title="Mesa 2", top=90 + 14 * 1.4 + 3 * 14 + 40)
+    make_listing_pdf(path, [first + second])
+    reading = read_roll(path)
+    assert [row.values.get("table") for row in reading.rows] == [None] * 3 + ["2"] * 3
+    assert [row.needs_review for row in reading.rows] == [True] * 3 + [False] * 3
+    _, _, electors = open_padron(padron_bytes(reading.records()))
+    assert [elector["review"]["status"] for elector in electors] == ["pending"] * 3 + ["ok"] * 3
 
 
 def test_the_command_line_counts_the_tables(tmp_path, capsys):

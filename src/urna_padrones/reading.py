@@ -178,6 +178,7 @@ def read_roll(
     columns = _text_columns(path, count) if kind == "pdf" else None
     per_page = _read_pages(path, kind, count, workers, on_page, cancelled, on_rows, columns)
     _reread_without_header(path, kind, per_page, cancelled)
+    _carry_tables(per_page)
     rows = [row for page in per_page for row in page.rows]
     if not rows:
         raise RollError("unknown_layout")
@@ -266,6 +267,24 @@ def _reread_without_header(
             per_page[index] = read_page(image, index, checkpoint, header=headers[page.separators], photo=kind == "image")
 
 
+def _carry_tables(per_page: list[PageReading]) -> None:
+    """A listing with text sorted by table goes on with the table it ended a page with, on the next page with text,
+    until a line such as «Mesa 13» starts another.
+
+    Only text, which is exact, carries a table on: a scanned page without a title of its own takes none, since a
+    title read wrong would move people to another table. Whoever is left without a table is reviewed (see _finish).
+    """
+    current = None
+    for page in per_page:
+        if not page.rows or page.rows[0].source != "text":
+            current = None
+            continue
+        for row in page.rows:
+            if row.title_table is None and "table" not in row.columns:
+                row.title_table = current
+        current = page.rows[-1].title_table
+
+
 def _read_pages(
     path: Path,
     kind: str,
@@ -344,7 +363,8 @@ class _Lent:
 def _finish(rows: list[Row]) -> list[ReadRow]:
     """Clean every value and make the degree read from pictures consistent along the roll.
 
-    A degree taken from the text of a PDF is exact and stays as it is.
+    A degree taken from the text of a PDF is exact and stays as it is. In a roll where some people have a table,
+    whoever has none is left for review, with its table not valid.
     """
     programs = [row.checked("program").value for row in rows]
     read = [index for index, row in enumerate(rows) if row.source != "text"]
@@ -383,6 +403,11 @@ def _finish(rows: list[Row]) -> list[ReadRow]:
                 columns=row.columns,
             )
         )
+    if any(row.values.get("table") for row in finished):
+        for row in finished:
+            if not row.values.get("table"):
+                row.valid["table"] = False
+                row.needs_review = True
     return finished
 
 
