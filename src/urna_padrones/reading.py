@@ -198,7 +198,7 @@ def _text_columns(path: Path, count: int) -> TextColumns | None:
     a header of their own, are read from their text at once instead of being recognised from their picture first."""
     for index in range(min(count, HEADER_PAGES)):
         text = page_text(path, index)
-        columns = first_columns(text) if text is not None else None
+        columns = first_columns(text) if text is not None and not text.scanned else None
         if columns is not None:
             return columns
     return None
@@ -213,16 +213,20 @@ def _read_one(
     lend: Callable[[dict[int, Header] | None], None] | None = None,
     borrow: Callable[[], dict[int, Header] | None] | None = None,
 ) -> PageReading:
-    """One page: from its text when it or `columns` gives a header, from its picture otherwise."""
+    """One page: from its text when it or `columns` gives a header, from its picture otherwise.
+
+    A page that is a picture, such as a scan with a stamp printed on it, takes no columns from another page: the
+    text on it is not a table.
+    """
     text = page_text(path, index) if kind == "pdf" else None
     if text is not None:
-        reading = read_text_page(text, index, columns)
+        reading = read_text_page(text, index, None if text.scanned else columns)
         if reading.rows:
             return reading
     checkpoint()
     image = render(path, index)
     reading = read_page(image, index, checkpoint=checkpoint, photo=kind == "image", lend=lend, borrow=borrow)
-    reading.has_text = text is not None
+    reading.has_text = text is not None and not text.scanned
     return reading
 
 

@@ -5,7 +5,8 @@ are taken as they are, with nothing to recognise and nothing to doubt, and the t
 where they are: rows by their baseline, and columns by where the names of the header are.
 
 Text a scanner adds on top of its picture, invisible, is not taken: it is the scanner's own reading,
-and the page is read from its picture like any other scan.
+and the page is read from its picture like any other scan. Neither is visible text on a page that is a
+picture, such as a stamp, unless it names its columns itself.
 """
 
 import ctypes
@@ -34,6 +35,10 @@ WORD_GAP = 0.25
 WRAP_SURE = 0.85
 # A line without a number this many rows away from the people is a title or a footer.
 EDGE_ROWS = 1.5
+# A page whose pictures cover this share of it is a scan.
+SCAN_SHARE = 0.8
+# Text this light on every channel does not show on paper.
+WHITE = 245
 LIGATURES = str.maketrans({"ﬀ": "ff", "ﬁ": "fi", "ﬂ": "fl", "ﬃ": "ffi", "ﬄ": "ffl", "ﬅ": "st", "ﬆ": "st"})
 
 
@@ -55,6 +60,9 @@ class TextPage:
     width: int
     height: int
     words: list[Word]
+    # Whether pictures cover most of the page, as in a scan: its text is a stamp or a scanner's reading, and is
+    # read only when it names its columns itself.
+    scanned: bool = False
 
 
 @dataclass(frozen=True)
@@ -66,9 +74,12 @@ class TextColumns:
 
 
 def page_text(path: Path, index: int, dpi: int = TARGET_DPI) -> TextPage | None:
-    """The visible words of a page, or None when it has too few: a scan, or a page with only a stamp.
+    """The visible words of a page, upright as the page is shown, or None when it has too few: a scan, or a page with
+    only a stamp.
 
-    A rotated page is left to the picture, which comes out upright, and so is text written at an angle.
+    A page turned by the PDF, as a viewer saves a landscape page, has its words turned with it, like its picture.
+    Text written at an angle is left out, and so is text that does not show: invisible, only a clipping path,
+    white, or drawn under a picture that covers it, as some scanners leave their own reading.
     """
     scale = dpi / 72
     with PDFIUM_LOCK:
@@ -79,12 +90,12 @@ def page_text(path: Path, index: int, dpi: int = TARGET_DPI) -> TextPage | None:
         try:
             page = document[index]
             try:
-                if page.get_rotation() % 360:
-                    return None
-                left, bottom, right, top = page.get_cropbox()
+                rotation = page.get_rotation() % 360
+                crop = page.get_cropbox()
+                hidden, pictures = _objects(page.raw, crop)
                 textpage = page.get_textpage()
                 try:
-                    characters = _characters(textpage)
+                    characters = _characters(textpage, hidden, rotation, crop)
                 finally:
                     textpage.close()
             finally:
@@ -95,6 +106,8 @@ def page_text(path: Path, index: int, dpi: int = TARGET_DPI) -> TextPage | None:
             document.close()
     if sum(1 for c in characters if c is not None) < MIN_CHARACTERS:
         return None
+    left, bottom, right, top = crop
+    width, height = (top - bottom, right - left) if rotation in (90, 270) else (right - left, top - bottom)
     words = []
     for group in _word_groups(characters):
         text = unicodedata.normalize("NFC", "".join(c[0] for c in group).translate(LIGATURES))
@@ -103,28 +116,49 @@ def page_text(path: Path, index: int, dpi: int = TARGET_DPI) -> TextPage | None:
         words.append(
             Word(
                 text=text,
-                left=(min(c[1] for c in group) - left) * scale,
-                right=(max(c[2] for c in group) - left) * scale,
-                top=(top - max(c[4] for c in group)) * scale,
-                bottom=(top - min(c[3] for c in group)) * scale,
-                baseline=(top - baseline) * scale,
+                left=min(c[1] for c in group) * scale,
+                right=max(c[2] for c in group) * scale,
+                top=(height - max(c[4] for c in group)) * scale,
+                bottom=(height - min(c[3] for c in group)) * scale,
+                baseline=(height - baseline) * scale,
                 size=size * scale,
             )
         )
-    return TextPage(width=round((right - left) * scale), height=round((top - bottom) * scale), words=words)
+    scanned = pictures >= SCAN_SHARE * (right - left) * (top - bottom)
+    return TextPage(width=round(width * scale), height=round(height * scale), words=words, scanned=scanned)
 
 
 Character = tuple[str, float, float, float, float, float, float]
 
 
-def _characters(textpage: pdfium.PdfTextPage) -> list[Character | None]:
-    """Each character as (text, left, right, bottom, top, baseline, size) in PDF points, or None for a break.
+def _turn(rotation: int, crop: tuple[float, float, float, float]):
+    """From a point of the PDF page to the same point on the page as it is shown, both in points from the bottom left."""
+    left, bottom, right, top = crop
+    if rotation == 90:
+        return lambda x, y: (y - bottom, right - x)
+    if rotation == 180:
+        return lambda x, y: (right - x, top - y)
+    if rotation == 270:
+        return lambda x, y: (top - y, x - left)
+    return lambda x, y: (x - left, y - bottom)
 
-    Spaces, line ends, invisible text and text at an angle are breaks.
+
+def _characters(
+    textpage: pdfium.PdfTextPage, hidden: set[int], rotation: int, crop: tuple[float, float, float, float]
+) -> list[Character | None]:
+    """Each character as (text, left, right, bottom, top, baseline, size) in points on the page as it is shown, or
+    None for a break.
+
+    Spaces, line ends, text that does not show, text in the objects `hidden` and text at an angle are breaks.
     """
     raw = textpage.raw
+    turn = _turn(rotation, crop)
+    # Upright text on a page the PDF turns clockwise runs at that angle the other way on the page itself. PDFium
+    # measures angles clockwise.
+    upright = math.radians((360 - rotation) % 360)
     x, y = ctypes.c_double(), ctypes.c_double()
     box = pdfium_c.FS_RECTF()
+    shows: dict[int, bool] = {}
     found: list[Character | None] = []
     for index in range(pdfium_c.FPDFText_CountChars(raw)):
         code = pdfium_c.FPDFText_GetUnicode(raw, index)
@@ -133,9 +167,12 @@ def _characters(textpage: pdfium.PdfTextPage) -> list[Character | None]:
             found.append(None)
             continue
         item = pdfium_c.FPDFText_GetTextObject(raw, index)
-        invisible = item and pdfium_c.FPDFTextObj_GetTextRenderMode(item) == pdfium_c.FPDF_TEXTRENDERMODE_INVISIBLE
+        address = _address(item)
+        if address is not None and address not in shows:
+            shows[address] = address not in hidden and _shows(item)
         angle = pdfium_c.FPDFText_GetCharAngle(raw, index)
-        if invisible or angle < 0 or min(angle, 2 * math.pi - angle) > 0.02:
+        off = (angle - upright) % (2 * math.pi)
+        if not shows.get(address, True) or angle < 0 or min(off, 2 * math.pi - off) > 0.02:
             found.append(None)
             continue
         if not pdfium_c.FPDFText_GetLooseCharBox(raw, index, ctypes.byref(box)):
@@ -143,8 +180,87 @@ def _characters(textpage: pdfium.PdfTextPage) -> list[Character | None]:
             continue
         pdfium_c.FPDFText_GetCharOrigin(raw, index, ctypes.byref(x), ctypes.byref(y))
         size = pdfium_c.FPDFText_GetFontSize(raw, index) or (box.top - box.bottom)
-        found.append((text, box.left, box.right, box.bottom, box.top, y.value, size))
+        (x0, y0), (x1, y1) = turn(box.left, box.bottom), turn(box.right, box.top)
+        found.append((text, min(x0, x1), max(x0, x1), min(y0, y1), max(y0, y1), turn(x.value, y.value)[1], size))
     return found
+
+
+def _address(item) -> int | None:
+    return ctypes.cast(item, ctypes.c_void_p).value if item else None
+
+
+def _bounds(item) -> tuple[float, float, float, float] | None:
+    left, bottom, right, top = (ctypes.c_float() for _ in range(4))
+    if not pdfium_c.FPDFPageObj_GetBounds(item, *(ctypes.byref(v) for v in (left, bottom, right, top))):
+        return None
+    return left.value, bottom.value, right.value, top.value
+
+
+def _has_picture(form, depth: int = 0) -> bool:
+    """Whether a group of drawings (a form) holds a picture, as some scanners wrap theirs."""
+    for index in range(pdfium_c.FPDFFormObj_CountObjects(form)):
+        item = pdfium_c.FPDFFormObj_GetObject(form, index)
+        kind = pdfium_c.FPDFPageObj_GetType(item)
+        if kind == pdfium_c.FPDF_PAGEOBJ_IMAGE:
+            return True
+        if kind == pdfium_c.FPDF_PAGEOBJ_FORM and depth < 4 and _has_picture(item, depth + 1):
+            return True
+    return False
+
+
+def _objects(page, crop: tuple[float, float, float, float]) -> tuple[set[int], float]:
+    """The text drawn under a picture that covers it, as object addresses, and how much of the page pictures cover,
+    in square points. The page draws its objects in order: a later one covers an earlier one."""
+    left, bottom, right, top = crop
+    pictures: list[tuple[int, tuple[float, float, float, float]]] = []
+    texts: list[tuple[int, int, tuple[float, float, float, float]]] = []
+    for index in range(pdfium_c.FPDFPage_CountObjects(page)):
+        item = pdfium_c.FPDFPage_GetObject(page, index)
+        kind = pdfium_c.FPDFPageObj_GetType(item)
+        bounds = _bounds(item)
+        if bounds is None:
+            continue
+        if kind == pdfium_c.FPDF_PAGEOBJ_IMAGE or (kind == pdfium_c.FPDF_PAGEOBJ_FORM and _has_picture(item)):
+            pictures.append((index, bounds))
+        elif kind == pdfium_c.FPDF_PAGEOBJ_TEXT:
+            texts.append((index, _address(item), bounds))
+    hidden = {
+        address
+        for index, address, box in texts
+        if any(later > index and _inside(box, cover) for later, cover in pictures)
+    }
+    area = sum(
+        max(0.0, min(r, right) - max(l, left)) * max(0.0, min(t, top) - max(b, bottom)) for _, (l, b, r, t) in pictures
+    )
+    return hidden, area
+
+
+def _inside(box: tuple[float, float, float, float], cover: tuple[float, float, float, float]) -> bool:
+    return box[0] >= cover[0] - 1 and box[1] >= cover[1] - 1 and box[2] <= cover[2] + 1 and box[3] <= cover[3] + 1
+
+
+# Text render modes: which ones fill the letters and which ones stroke them. Modes 3 (invisible) and 7 (only a
+# clipping path) paint nothing.
+FILLED_MODES = (0, 2, 4, 6)
+STROKED_MODES = (1, 2, 5, 6)
+
+
+def _shows(item) -> bool:
+    """Whether a text object paints its letters in a color that shows on paper."""
+    mode = pdfium_c.FPDFTextObj_GetTextRenderMode(item)
+    if mode < 0:
+        return True
+    filled = mode in FILLED_MODES and _inked(pdfium_c.FPDFPageObj_GetFillColor, item)
+    stroked = mode in STROKED_MODES and _inked(pdfium_c.FPDFPageObj_GetStrokeColor, item)
+    return filled or stroked
+
+
+def _inked(color, item) -> bool:
+    channels = [ctypes.c_uint() for _ in range(4)]
+    if not color(item, *(ctypes.byref(c) for c in channels)):
+        return True
+    red, green, blue, alpha = (c.value for c in channels)
+    return alpha > 0 and min(red, green, blue) < WHITE
 
 
 def _word_groups(characters: list[Character | None]) -> list[list[Character]]:

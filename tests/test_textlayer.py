@@ -7,7 +7,7 @@ import cv2
 import numpy as np
 import pytest
 
-from fake_layouts import listing_page, make_listing_pdf, pdf_bytes, people, text_content
+from fake_layouts import listing_page, make_listing_pdf, pdf_bytes, people, text_content, turned_content
 from fake_roll import draw_page, fake_rows, find_font
 from urna_padrones import cli
 from urna_padrones import reading as reading_module
@@ -221,6 +221,58 @@ def test_invisible_text_a_scanner_added_is_not_taken(tmp_path):
     reading = read_roll(path)
     assert reading.pages_with_text == []
     assert sum(row.values["document"] == person["document"] for row, person in zip(reading.rows, rows)) >= 9
+
+
+def test_a_scanned_page_with_a_stamp_is_read_from_its_picture(tmp_path):
+    """The stamp's date is under «Tipo y número» of the typed page: it is not a person, and the scan is read."""
+    path = tmp_path / "mixto-con-sello.pdf"
+    typed = people(10, seed=2)
+    rows = fake_rows(10, seed=5, first_order=11)
+    image, _ = scanned(rows)
+    stamp = text_content([(40, 825, 7, "Copia fiel"), (90, 825, 7, "05/11/2026"), (190, 825, 7, "Hoja 2 de 2, impresa")])
+    path.write_bytes(pdf_bytes([{"content": listing_page(typed, HEADERS, KEYS, COLUMN_X)}, {"image": image, "content": stamp}]))
+    assert page_text(path, 1).scanned
+    reading = read_roll(path)
+    assert reading.pages_with_text == [0] and reading.pages_without_table == []
+    second = [row for row in reading.rows if row.page == 1]
+    assert len(second) == 10 and all(row.layout == "facultad" for row in second)
+    assert sum(row.values["document"] == person["document"] for row, person in zip(second, rows)) >= 9
+
+
+@pytest.mark.parametrize("how", ["under a picture", "clipping path", "white"])
+def test_text_that_does_not_show_is_not_taken(tmp_path, how):
+    path = tmp_path / "oculto.pdf"
+    items = listing_page(people(10, seed=7), HEADERS, KEYS, COLUMN_X)
+    if how == "under a picture":
+        page = {"image": np.full((3508, 2480), 250, np.uint8), "under": items}
+    elif how == "clipping path":
+        page = {"content": items.replace(b"BT /F1", b"BT 7 Tr /F1")}
+    else:
+        page = {"content": items.replace(b"BT /F1", b"BT 1 g /F1")}
+    path.write_bytes(pdf_bytes([page]))
+    assert page_text(path, 0) is None
+
+
+@pytest.mark.parametrize("rotation", [90, 270])
+def test_a_page_the_pdf_turns_is_read_from_its_text(tmp_path, rotation):
+    """A landscape listing saved as a portrait page turned by the PDF, as a viewer does after turning it."""
+    path = tmp_path / "apaisado.pdf"
+    drawn = people(20, seed=4)
+    column_x = [40, 80, 170, 380, 560]
+    items = [(x, 60, 8.5, header) for x, header in zip(column_x, ["Nº", "DNI", "Apellido y nombre", "Carrera", "Domicilio"])]
+    for i, person in enumerate(drawn):
+        items += [(x, 80 + 14 * i, 8.5, person[key]) for x, key in zip(column_x, ["order", "document", "name", "program", "address"])]
+    path.write_bytes(pdf_bytes([{"content": turned_content(items, rotation), "rotate": rotation}]))
+    reading = read_roll(path)
+    assert reading.pages_with_text == [0]
+    assert [row.values["name"] for row in reading.rows] == [person["name"] for person in drawn]
+    assert [row.values["address"] for row in reading.rows] == [person["address"] for person in drawn]
+    # The image of a row is cut from the page as it is shown, landscape, where the row is.
+    row = reading.rows[5]
+    image = cv2.imdecode(np.frombuffer(row_image(path, row.box, margin=0, scale=1.0), np.uint8), cv2.IMREAD_GRAYSCALE)
+    assert row.box.right > 2480  # wider than the page in portrait
+    ink = (image < 128).mean(axis=1)
+    assert ink[len(ink) // 2 - 4 : len(ink) // 2 + 4].max() > 0.05 and ink[0] == 0 and ink[-1] == 0
 
 
 def test_text_without_a_header_it_knows_is_not_a_roll(tmp_path):

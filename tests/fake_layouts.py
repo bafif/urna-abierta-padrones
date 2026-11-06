@@ -86,15 +86,35 @@ def _pdf_string(text: str) -> bytes:
     return b"(" + data.replace(b"\\", b"\\\\").replace(b"(", b"\\(").replace(b")", b"\\)") + b")"
 
 
-def text_content(items: list[tuple[float, float, float, str]], lines=(), invisible: bool = False) -> bytes:
-    """A page's drawing: `items` are (x, y from the top, size, text) in points, `lines` are (x0, y0, x1, y1)."""
+def text_content(
+    items: list[tuple[float, float, float, str]], lines=(), invisible: bool = False, mode: int = 0, gray: float = 0.0
+) -> bytes:
+    """A page's drawing: `items` are (x, y from the top, size, text) in points, `lines` are (x0, y0, x1, y1).
+
+    `mode` is the PDF's text render mode (3 is invisible, as `invisible` says, and 7 only a clipping path), and
+    `gray` the color of the letters, from 0 (black) to 1 (white).
+    """
     height = POINTS[1]
     out = bytearray()
     for x0, y0, x1, y1 in lines:
         out += b"0.6 w %.2f %.2f m %.2f %.2f l S\n" % (x0, height - y0, x1, height - y1)
+    style = b"%d Tr %.2f g " % (3 if invisible else mode, gray) if invisible or mode or gray else b""
     for x, y, size, text in items:
-        mode = b"3 Tr " if invisible else b""
-        out += b"BT /F1 %.2f Tf %s1 0 0 1 %.2f %.2f Tm %s Tj ET\n" % (size, mode, x, height - y, _pdf_string(text))
+        out += b"BT /F1 %.2f Tf %s1 0 0 1 %.2f %.2f Tm %s Tj ET\n" % (size, style, x, height - y, _pdf_string(text))
+    return bytes(out)
+
+
+def turned_content(items: list[tuple[float, float, float, str]], rotation: int) -> bytes:
+    """The drawing of a portrait page that the PDF turns by `rotation` (90 or 270) to show it in landscape, with
+    `items` (x, y from the top, size, text) upright on the page as it is shown, as a viewer saves a turned page."""
+    width, height = POINTS
+    out = bytearray()
+    for x, y, size, text in items:
+        if rotation == 90:
+            matrix = b"0 1 -1 0 %.2f %.2f" % (y, x)
+        else:
+            matrix = b"0 -1 1 0 %.2f %.2f" % (width - y, height - x)
+        out += b"BT /F1 %.2f Tf %s Tm %s Tj ET\n" % (size, matrix, _pdf_string(text))
     return bytes(out)
 
 
@@ -102,7 +122,8 @@ def pdf_bytes(pages: list[dict]) -> bytes:
     """A PDF from pages given as {"content": bytes} and, for a scan, {"image": 2D uint8 array at 300 dpi}.
 
     The text is in Helvetica with the Windows Latin encoding, which has every Spanish letter. An image
-    fills the page and the content, if any, is drawn on top of it.
+    fills the page and the content, if any, is drawn on top of it; "under" is drawn before the image, which
+    covers it. "rotate" turns the page clockwise when it is shown, by 90, 180 or 270 degrees.
     """
     width, height = POINTS
     objects: list[bytes] = [b"", b"", b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>"]
@@ -120,12 +141,13 @@ def pdf_bytes(pages: list[dict]) -> bytes:
                 + b"\nendstream"
             )
             resources += b" /XObject << /Im0 %d 0 R >>" % len(objects)
-            content = b"q %.2f 0 0 %.2f 0 0 cm /Im0 Do Q\n" % (width, height) + content
+            content = page.get("under", b"") + b"q %.2f 0 0 %.2f 0 0 cm /Im0 Do Q\n" % (width, height) + content
         objects.append(b"<< /Length %d >>\nstream\n" % len(content) + content + b"\nendstream")
         contents = len(objects)
+        rotate = b" /Rotate %d" % page["rotate"] if page.get("rotate") else b""
         objects.append(
-            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 %.2f %.2f] /Resources << %s >> /Contents %d 0 R >>"
-            % (width, height, resources, contents)
+            b"<< /Type /Page /Parent 2 0 R%s /MediaBox [0 0 %.2f %.2f] /Resources << %s >> /Contents %d 0 R >>"
+            % (rotate, width, height, resources, contents)
         )
         kids.append(len(objects))
     objects[0] = b"<< /Type /Catalog /Pages 2 0 R >>"
