@@ -36,6 +36,9 @@ Un padrón es un archivo ZIP, con extensión `.padron`. Trae datos de personas: 
 - Un lector rechaza un archivo con otra versión mayor, y acepta campos que no conoce.
 - `count` tiene que coincidir con las filas: así se nota un archivo cortado.
 - `extraction.external_ai` dice si una IA externa vio los datos. Una elección puede no permitirlo.
+- `extraction.provider` es opcional: cuando `external_ai` es `true`, qué servicio vio los datos, como
+  `"api.eu.mistral.ai (mistral-ocr-latest)"`. Es un texto para mostrar a una persona, sin una forma fija. Si falta,
+  no se sabe cuál.
 
 ## Una persona
 

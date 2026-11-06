@@ -74,6 +74,20 @@ def test_the_file_says_how_many_people_it_has_and_only_its_owner_can_read_it(tmp
     assert manifest["files"]["electors"]["count"] == len(electors) == 2
 
 
+def test_the_manifest_says_whether_an_outside_ai_saw_the_data():
+    def extraction(records):
+        with zipfile.ZipFile(io.BytesIO(padron_bytes(records))) as archive:
+            return json.loads(archive.read("manifest.json"))["extraction"]
+
+    assert extraction([record()]) == {"tool": "urna-padrones", "external_ai": False}
+    seen = record(document="99000002", external_ai="api.eu.mistral.ai (mistral-ocr-latest)")
+    assert extraction([record(), seen]) == {
+        "tool": "urna-padrones",
+        "external_ai": True,
+        "provider": "api.eu.mistral.ai (mistral-ocr-latest)",
+    }
+
+
 def contents(data):
     """What a .padron holds, without the moment it was made."""
     with zipfile.ZipFile(io.BytesIO(data)) as archive:

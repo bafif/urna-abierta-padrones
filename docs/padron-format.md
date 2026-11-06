@@ -36,6 +36,9 @@ A roll is a ZIP file with the `.padron` extension. It holds people's data: treat
 - A reader refuses a file with another major version, and accepts fields it does not know.
 - `count` has to match the rows: that is how a truncated file gets noticed.
 - `extraction.external_ai` says whether an external AI saw the data. An election may not allow it.
+- `extraction.provider` is optional: when `external_ai` is `true`, which service saw the data, such as
+  `"api.eu.mistral.ai (mistral-ocr-latest)"`. It is text to show a person, without a fixed form. When it is missing,
+  which one is not known.
 
 ## A person
 

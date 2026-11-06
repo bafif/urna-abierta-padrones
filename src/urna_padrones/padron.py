@@ -98,6 +98,16 @@ def electors_from(records: list[dict]) -> list[dict]:
     return electors
 
 
+def extraction_of(records: list[dict]) -> dict:
+    """How the records were read: whether an outside AI saw them and, when the records say, which service."""
+    marks = [record.get("external_ai") for record in records if record.get("external_ai")]
+    providers = sorted({str(mark) for mark in marks if isinstance(mark, str)})
+    extraction: dict = {"tool": "urna-padrones", "external_ai": bool(marks)}
+    if providers:
+        extraction["provider"] = "; ".join(providers)
+    return extraction
+
+
 def _summary(electors: list[dict]) -> dict:
     """How many people and how many to review, and how many tables when the roll has them."""
     summary = {"people": len(electors), "to_review": sum(e["review"]["status"] == "pending" for e in electors)}
@@ -125,9 +135,10 @@ def padron_bytes(records: list[dict], title: str | None = None) -> bytes:
     with the same id and the same name is the same person in another program and is left out.
 
     A record with a "table" puts its person at that table, and the file gets one unit per table. A
-    record with an "address" keeps it.
+    record with an "address" keeps it. A record with "external_ai", the service that read it, makes the
+    manifest say that an outside AI saw the data, and which service.
     """
-    return _archive(electors_from(records), title)
+    return _archive(electors_from(records), title, extraction_of(records))
 
 
 def units_from(electors: list[dict]) -> list[dict]:
@@ -140,13 +151,13 @@ def units_from(electors: list[dict]) -> list[dict]:
     return list(units.values())
 
 
-def _archive(electors: list[dict], title: str | None) -> bytes:
+def _archive(electors: list[dict], title: str | None, extraction: dict) -> bytes:
     units = units_from(electors)
     manifest = {
         "format": "padron-abierto",
         "format_version": FORMAT_VERSION,
         "created_at": datetime.now(timezone.utc).isoformat(),
-        "extraction": {"tool": "urna-padrones", "external_ai": False},
+        "extraction": extraction,
         "extra_fields": [{"key": "program", "label": "Carrera"}, {"key": "status", "label": "Calidad"}],
         "files": {"electors": {"path": "electors.jsonl", "count": len(electors)}},
     }
@@ -170,7 +181,7 @@ def write_padron(records: list[dict], out: Path, title: str | None = None) -> di
     The content is padron_bytes(records, title); see there how review works.
     """
     electors = electors_from(records)
-    data = _archive(electors, title)
+    data = _archive(electors, title, extraction_of(records))
     descriptor = os.open(out, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(descriptor, "wb") as handle:
         handle.write(data)
