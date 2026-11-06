@@ -74,7 +74,8 @@ def extract(args: argparse.Namespace) -> int:
         print("\n" if shown["open"] else "", error, sep="", file=sys.stderr)
         return 1
     descriptor = os.open(args.out, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+    # The same bytes on every system: a JSONL line ends in \n, also on Windows.
+    with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as handle:
         for record in reading.records():
             handle.write(json.dumps(record, ensure_ascii=False) + "\n")
     summary = (f"{len(reading.rows)} filas de {reading.pages_read} páginas en {time.monotonic() - started:.0f} s; "
