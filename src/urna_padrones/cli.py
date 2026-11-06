@@ -10,6 +10,7 @@ from pathlib import Path
 from . import quality
 from .padron import write_padron
 from .reading import RollError, read_roll
+from .reference import SpreadsheetError, read_reference
 
 
 def inside_git_repo(path: Path) -> bool:
@@ -75,6 +76,21 @@ def show_crosscheck(args: argparse.Namespace) -> int:
     return 0
 
 
+def show_verify(args: argparse.Namespace) -> int:
+    try:
+        reference = read_reference(args.spreadsheet)
+    except (SpreadsheetError, OSError, ValueError) as error:
+        print(f"No se pudo leer la planilla: {error}", file=sys.stderr)
+        return 1
+    result, rows = quality.verify(quality.load_records(args.records), reference)
+    print(json.dumps(result, ensure_ascii=False, indent=1))
+    if args.rows:
+        # Only row numbers of the person's own spreadsheet and what to check there, never a value.
+        for row, what in rows.items():
+            print(f"fila {row}: {'; '.join(what)}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="urna-padrones", description=__doc__)
     commands = parser.add_subparsers(required=True)
@@ -98,6 +114,12 @@ def main(argv: list[str] | None = None) -> int:
     command.add_argument("first", type=Path)
     command.add_argument("second", type=Path)
     command.set_defaults(run=show_crosscheck)
+    command = commands.add_parser("verify", help="compara una extracción con el padrón tipeado en una planilla")
+    command.add_argument("records", type=Path)
+    command.add_argument("spreadsheet", type=Path, help="planilla .xlsx o .csv con nombre, documento y legajo")
+    command.add_argument("--filas", dest="rows", action="store_true",
+                         help="además, lista las filas de la planilla para revisar (sin mostrar los datos)")
+    command.set_defaults(run=show_verify)
     args = parser.parse_args(argv)
     return args.run(args)
 

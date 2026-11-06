@@ -6,7 +6,7 @@ from collections import Counter
 from difflib import SequenceMatcher
 from pathlib import Path
 
-from .fields import fold
+from .fields import DOCUMENT, FILE_NUMBER, file_number_adds_up, fold
 
 
 def load_records(path: Path) -> list[dict]:
@@ -185,3 +185,115 @@ def crosscheck(first: list[dict], second: list[dict]) -> dict:
             "file_number": share(accepted_file, accepted_file_compared),
         },
     }
+
+
+def _similar(a: str, b: str) -> bool:
+    return a == b or SequenceMatcher(None, a, b).ratio() >= 0.85
+
+
+def _reference_checks(reference: list[dict]) -> tuple[dict, dict[int, list[str]]]:
+    """What is odd in the spreadsheet itself, as counts and as the rows to look at."""
+    rows: dict[int, list[str]] = {}
+    documents = Counter(p["document"] for p in reference if p["document"])
+    file_numbers = Counter(p["file_number"] for p in reference if p["file_number"])
+    counts = Counter()
+    for person in reference:
+        found = []
+        if not person["document"]:
+            found.append("sin DNI")
+        elif not DOCUMENT.match(person["document"]):
+            found.append("el DNI no tiene 7 u 8 números")
+        elif documents[person["document"]] > 1:
+            found.append("DNI repetido en la planilla")
+        if person["file_number"]:
+            if not FILE_NUMBER.match(person["file_number"]):
+                found.append("el legajo no tiene la forma A-1234/3")
+            elif not file_number_adds_up(person["file_number"]):
+                found.append("el dígito del legajo no corresponde")
+            if file_numbers[person["file_number"]] > 1:
+                found.append("legajo repetido en la planilla")
+        counts.update(found)
+        if found:
+            rows[person["row"]] = found
+    return dict(counts), rows
+
+
+def verify(records: list[dict], reference: list[dict]) -> tuple[dict, dict[int, list[str]]]:
+    """Compare a reading with a roll typed into a spreadsheet, and say where they differ.
+
+    A person of the spreadsheet is matched to a read row when two of document, legajo and name agree, so a
+    difference in any one of them still finds its row. A difference may come from the reading or from the
+    spreadsheet: the figures say how many, never what. Returns the counts and, by spreadsheet row, what to check.
+    """
+    by_document: dict[str, list[dict]] = {}
+    by_file: dict[str, list[dict]] = {}
+    by_name: dict[str, list[dict]] = {}
+    for record in records:
+        if record.get("document"):
+            by_document.setdefault(record["document"], []).append(record)
+        if record.get("file_number"):
+            by_file.setdefault(record["file_number"], []).append(record)
+        by_name.setdefault(_key_name_compact(record.get("name")), []).append(record)
+    counts, rows = _reference_checks(reference)
+    matched = 0
+    used: set[int] = set()
+    same = Counter()
+    compared = Counter()
+    sure = flagged = sure_differs = flagged_differs = 0
+    sure_by_field = Counter()
+    for person in reference:
+        name = _key_name_compact(person["name"])
+        candidates = by_document.get(person["document"], []) + by_file.get(person["file_number"], []) + by_name.get(name, [])
+        best, best_votes = None, 1
+        for record in candidates:
+            votes = (
+                bool(person["document"]) and record.get("document") == person["document"],
+                bool(person["file_number"]) and record.get("file_number") == person["file_number"],
+                _similar(_key_name_compact(record.get("name")), name),
+            )
+            if sum(votes) > best_votes:
+                best, best_votes = record, sum(votes)
+        if best is None:
+            rows.setdefault(person["row"], []).append("no está en la lectura")
+            continue
+        matched += 1
+        used.add(id(best))
+        differs = []
+        compared["name"] += 1
+        if _key_name_compact(best.get("name")) == name:
+            same["name"] += 1
+        else:
+            differs.append("nombre")
+        if person["document"]:
+            compared["document"] += 1
+            if best.get("document") == person["document"]:
+                same["document"] += 1
+            else:
+                differs.append("DNI")
+        if person["file_number"] and best.get("file_number"):
+            compared["file_number"] += 1
+            if best["file_number"] == person["file_number"]:
+                same["file_number"] += 1
+            else:
+                differs.append("legajo")
+        if best.get("needs_review"):
+            flagged += 1
+            flagged_differs += bool(differs)
+        else:
+            sure += 1
+            sure_differs += bool(differs)
+            sure_by_field.update(differs)
+        if differs:
+            rows.setdefault(person["row"], []).append("distinto de la lectura: " + ", ".join(differs))
+    share = lambda n, d: round(n / d, 4) if d else None  # noqa: E731
+    result = {
+        "people_in_spreadsheet": len(reference),
+        "spreadsheet": counts,
+        "found_in_reading": matched,
+        "read_rows_without_a_person": sum(1 for record in records if id(record) not in used),
+        "same_as_spreadsheet": {f: share(same[f], compared[f]) for f in ("name", "document", "file_number")},
+        "compared": dict(compared),
+        "rows_the_reading_gave_as_sure": {"rows": sure, "with_a_difference": sure_differs, "by_field": dict(sure_by_field)},
+        "rows_the_reading_flagged": {"rows": flagged, "with_a_difference": flagged_differs},
+    }
+    return result, dict(sorted(rows.items()))
