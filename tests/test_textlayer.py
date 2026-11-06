@@ -128,6 +128,69 @@ def test_a_title_and_a_footer_are_not_people(tmp_path):
     assert [row.values["document"] for row in reading.rows] == [person["document"] for person in drawn]
 
 
+WRAP_X = [40, 80, 170, 380, 560]
+WRAP_HEADERS = ["Nº", "DNI", "Apellido y nombre", "Carrera"]
+
+
+def wrapped_listing(path, drawn, wrapped, lines, align="top", spacing=11.0):
+    """A listing where the name of person `wrapped` takes `lines`, with the other cells at the top or the bottom."""
+    items = [(x, 90, 8.5, header) for x, header in zip(WRAP_X, WRAP_HEADERS)]
+    y = 90 + 14 * 1.4
+    for index, person in enumerate(drawn):
+        names = lines if index == wrapped else [person["name"]]
+        items += [(WRAP_X[2], y + spacing * i, 8.5, name) for i, name in enumerate(names)]
+        others = y if align == "top" else y + spacing * (len(names) - 1)
+        items += [(WRAP_X[0], others, 8.5, person["order"]), (WRAP_X[1], others, 8.5, person["document"])]
+        items.append((WRAP_X[3], others, 8.5, person["program"]))
+        y += spacing * (len(names) - 1) + 14
+    make_listing_pdf(path, [text_content(items)])
+
+
+@pytest.mark.parametrize("align", ["top", "bottom"])
+def test_a_name_that_wraps_onto_a_second_line_stays_one_name(tmp_path, align):
+    path = tmp_path / "nombre-largo.pdf"
+    drawn = people(5, seed=3)
+    wrapped_listing(path, drawn, 2, ["Prueba Inventada, Ana María", "de los Ejemplos"], align)
+    reading = read_roll(path)
+    assert [row.values["document"] for row in reading.rows] == [person["document"] for person in drawn]
+    names = [person["name"] for person in drawn]
+    names[2] = "Prueba Inventada, Ana María de los Ejemplos"
+    assert [row.values["name"] for row in reading.rows] == names
+    assert not any(row.needs_review for row in reading.rows)
+    # The image of the row shows both lines of the name.
+    assert reading.rows[2].box.bottom - reading.rows[2].box.top > 1.5 * (reading.rows[1].box.bottom - reading.rows[1].box.top)
+
+
+def test_a_wrapped_line_nearly_as_close_to_the_next_row_leaves_the_row_for_review(tmp_path):
+    path = tmp_path / "nombre-dudoso.pdf"
+    drawn = people(5, seed=3)
+    wrapped_listing(path, drawn, 2, ["Prueba Inventada, Ana María", "de los Ejemplos"], spacing=13)
+    reading = read_roll(path)
+    assert len(reading.rows) == 5
+    assert reading.rows[2].values["name"] == "Prueba Inventada, Ana María de los Ejemplos"
+    assert [row.needs_review for row in reading.rows] == [False, False, True, False, False]
+
+
+def test_a_long_name_stays_whole_on_a_page_with_one_row(tmp_path):
+    """The end of the name is past the end of «Apellido y nombre», next to a signature column without values."""
+    path = tmp_path / "una-fila.pdf"
+    items = [(x, 90, 8.5, header) for x, header in zip([40, 80, 170, 400], ["Nº", "DNI", "Apellido y nombre", "Firma"])]
+    items += [(40, 110, 8.5, "1"), (80, 110, 8.5, "99.100.200"), (170, 110, 8.5, "Prueba Ejemplo, María de los Ángeles")]
+    make_listing_pdf(path, [text_content(items)])
+    reading = read_roll(path)
+    assert [row.values["name"] for row in reading.rows] == ["Prueba Ejemplo, María de los Ángeles"]
+
+
+def test_a_footer_of_words_is_not_a_person(tmp_path):
+    path = tmp_path / "con-firma.pdf"
+    drawn = people(5, seed=8)
+    content = listing_page(drawn, WRAP_HEADERS, ["order", "document", "name", "program"], WRAP_X)
+    content += text_content([(200, 800, 8, "Firma del presidente de mesa"), (60, 40, 8, "Elección de prueba, todo inventado")])
+    make_listing_pdf(path, [content])
+    reading = read_roll(path)
+    assert [row.values["name"] for row in reading.rows] == [person["name"] for person in drawn]
+
+
 def scanned(rows):
     font, accents = find_font()
     return draw_page(rows, angle=0.4, font=font), accents

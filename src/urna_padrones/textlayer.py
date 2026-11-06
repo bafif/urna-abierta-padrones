@@ -19,6 +19,7 @@ import pypdfium2 as pdfium
 import pypdfium2.raw as pdfium_c
 
 from .errors import RollError
+from .fields import ASCII_DIGITS
 from .headers import IDENTIFYING, Header, mesa_in, recognise, split_labels
 from .pdf import PDFIUM_LOCK, TARGET_DPI
 from .table import BY_HEADER, PageReading, Row, has_number, is_person, join_name
@@ -29,6 +30,10 @@ MIN_CHARACTERS = 20
 CELL_GAP = 0.5
 # Letters further apart than this share of the font size are different words.
 WORD_GAP = 0.25
+# A wrapped line this much closer to one row than to the other is surely of the closer one (see _join_wrapped).
+WRAP_SURE = 0.85
+# A line without a number this many rows away from the people is a title or a footer.
+EDGE_ROWS = 1.5
 LIGATURES = str.maketrans({"ﬀ": "ff", "ﬁ": "fi", "ﬂ": "fl", "ﬃ": "ffi", "ﬄ": "ffl", "ﬅ": "st", "ﬆ": "st"})
 
 
@@ -264,8 +269,12 @@ def cells_of(lines: list[list[Word]], columns: TextColumns) -> list[dict[str, st
     or a word outside every stretch, such as a footer, goes to the name the word is under or nearest.
     """
     spans = columns.spans
-    # A line with a single cell may be a title or a footer across the columns: it does not make stretches.
-    stretches = sorted((word.left, word.right) for line in lines if len(_cells(line)) >= 2 for word in line)
+    # A line with a single cell may be a title or a footer across the columns: it does not make stretches. A cell
+    # makes one stretch, not one per word: the end of a long name, past the end of its name in the header, stays
+    # with the rest of the name.
+    stretches = sorted(
+        (cell[0].left, cell[-1].right) for line in lines if len(cells := _cells(line)) >= 2 for cell in cells
+    )
     segments: list[list[float]] = []
     for left, right in stretches:
         if segments and left <= segments[-1][1]:
@@ -315,27 +324,116 @@ def read_text_page(text: TextPage, page: int, columns: TextColumns | None = None
     # title, among the rows, starts another table: a listing sorted by table often has one before each.
     above = lines[: start - 1] if own is not None else []
     table = next((found for found in (mesa_in(_text(line)) for line in above) if found), None)
+    body = lines[start:]
+    entries = [
+        _Entry(line, values, _baseline(line), _baseline(line), mesa_in(_text(line)) if len(_cells(line)) == 1 else None)
+        for line, values in zip(body, cells_of(body, chosen))
+    ]
+    size = statistics.median(word.size for line in body for word in line) if body else 0.0
     rows = []
-    for line, values in zip(lines[start:], cells_of(lines[start:], chosen)):
-        if len(_cells(line)) == 1 and mesa_in(_text(line)):
-            table = mesa_in(_text(line))
+    for entry in _join_wrapped(entries, size):
+        if entry.mesa:
+            table = entry.mesa
             continue
-        row = Row(page=page, position=len(rows), raw=values, layout=BY_HEADER, columns=fields, source="text")
+        row = Row(page=page, position=len(rows), raw=entry.values, layout=BY_HEADER, columns=fields, source="text")
         join_name(row)
         row.confidence = {key: 1.0 for key in row.raw}
+        row.unsure = entry.unsure
         # On a page that borrows its columns, such as a cover letter in a listing, a name alone is not enough.
         if not is_person(row) or (own is None and not _identified(row)):
             continue
         row.title_table = table
-        top = min(word.top for word in line)
-        bottom = max(word.bottom for word in line)
-        margin = 0.3 * statistics.median(word.size for word in line)
+        words = entry.words
+        margin = 0.3 * statistics.median(word.size for word in words)
         row.band = (
-            max(0, round(top - margin)),
-            min(text.height, round(bottom + margin)),
-            max(0, round(min(left, line[0].left) - margin)),
-            min(text.width, round(max(right, line[-1].right) + margin)),
+            max(0, round(min(word.top for word in words) - margin)),
+            min(text.height, round(max(word.bottom for word in words) + margin)),
+            max(0, round(min(left, min(word.left for word in words)) - margin)),
+            min(text.width, round(max(right, max(word.right for word in words)) + margin)),
         )
         rows.append(row)
     return PageReading(rows, text_columns=own, has_text=True)
+
+
+@dataclass
+class _Entry:
+    """A line among the rows of a page, or the lines of one row when a cell takes more than one, with its values."""
+
+    words: list[Word]
+    values: dict[str, str]
+    # The baselines of its first and last line.
+    top: float
+    bottom: float
+    # The table a line such as «Mesa 13» starts, for a line that is only that.
+    mesa: str | None = None
+    unsure: bool = False
+
+
+def _baseline(line: list[Word]) -> float:
+    return statistics.median(word.baseline for word in line)
+
+
+def _numbered(values: dict[str, str]) -> bool:
+    return any(c in ASCII_DIGITS for key in IDENTIFYING for c in values.get(key, ""))
+
+
+def _join_wrapped(entries: list[_Entry], size: float) -> list[_Entry]:
+    """The rows of a page, with the lines of a cell that wraps joined to their row, and without titles and footers.
+
+    A line without a number of its own (no order, document or legajo) is the rest of a cell when it is closer to
+    the row above or below it than one row is to the next: a long name wraps onto a second line, below the rest
+    of the row when the cells are aligned to the top and above it when they are aligned to the bottom, as a
+    spreadsheet does. It goes to the closer row; when the other one is nearly as close, that row is left for review.
+    Such a line further than EDGE_ROWS rows above the first person or below the last one is a title or a footer,
+    such as «Firma del presidente de mesa», and is dropped. Any other line stays as it is.
+    """
+    people = [index for index, entry in enumerate(entries) if entry.mesa is None and _numbered(entry.values)]
+    if not people:
+        return entries
+    gaps = [entries[b].top - entries[a].bottom for a, b in zip(people, people[1:])]
+    pitch = statistics.median(gaps) if gaps else 2 * size
+    reach = 0.95 * pitch
+    numbered = set(people)
+    dropped: set[int] = set()
+    start = 0
+    while start < len(entries):
+        if entries[start].mesa is not None or start in numbered:
+            start += 1
+            continue
+        stop = start
+        while (
+            stop + 1 < len(entries)
+            and entries[stop + 1].mesa is None
+            and stop + 1 not in numbered
+            and entries[stop + 1].top - entries[stop].bottom <= reach
+        ):
+            stop += 1
+        run = list(range(start, stop + 1))
+        before = start - 1 if start - 1 in numbered else None
+        after = stop + 1 if stop + 1 in numbered else None
+        up = entries[start].top - entries[before].bottom if before is not None else math.inf
+        down = entries[after].top - entries[stop].bottom if after is not None else math.inf
+        if min(up, down) <= reach:
+            target = before if up <= down else after
+            _merge(entries[target], [entries[index] for index in run], below=target == before)
+            entries[target].unsure |= min(up, down) > WRAP_SURE * max(up, down)
+            dropped.update(run)
+        elif stop < people[0] and entries[people[0]].top - entries[stop].bottom > EDGE_ROWS * pitch:
+            dropped.update(run)
+        elif start > people[-1] and entries[start].top - entries[people[-1]].bottom > EDGE_ROWS * pitch:
+            dropped.update(run)
+        start = stop + 1
+    return [entry for index, entry in enumerate(entries) if index not in dropped]
+
+
+def _merge(target: _Entry, run: list[_Entry], below: bool) -> None:
+    """Join the lines of `run` to the row `target`, which they are `below` or above."""
+    parts = [target, *run] if below else [*run, target]
+    values: dict[str, str] = {}
+    for part in parts:
+        for key, text in part.values.items():
+            values[key] = f"{values[key]} {text}" if key in values else text
+    target.values = values
+    target.words = [word for part in parts for word in part.words]
+    target.top, target.bottom = parts[0].top, parts[-1].bottom
 

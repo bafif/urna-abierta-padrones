@@ -79,12 +79,17 @@ class Row:
     source: str = "ocr"
     # The table a title such as «Mesa 12» gives to the whole page, for a row without a table of its own.
     title_table: str | None = None
+    # Whether the row was put together from lines that could also belong to the row above or below it.
+    unsure: bool = False
 
     def checked(self, column: str) -> fields.Checked:
         return cleaner(column, self.layout)(self.raw.get(column, ""))
 
     def needs_review(self) -> bool:
-        """A person reads this row if a value breaks its format or the model was not sure."""
+        """A person reads this row if a value breaks its format, the model was not sure, or the row may be put together
+        wrong."""
+        if self.unsure:
+            return True
         for column in self.columns:
             checked = self.checked(column)
             if not checked.valid or checked.repaired:
