@@ -290,6 +290,10 @@ Queda en `dist/`. Algunas decisiones:
   así arranca rápido, sin desempaquetar 300 MB en cada inicio, y los antivirus lo miran menos.
 - De los modelos de rapidocr va solo el de reconocimiento que usa el lector. Quedan afuera Tk y, en Windows, el
   complemento de video de OpenCV (FFmpeg).
+- El ícono de Windows y de macOS es la marca de las pantallas del lector, en el color del tema «Aula», sobre fondo
+  transparente. Está en `packaging/iconos/` y se rehace con `uv run python tools/hacer-iconos.py`, que dibuja cada
+  tamaño desde el mismo SVG con rsvg-convert. Para armar el lector no hace falta rsvg-convert: los íconos ya están
+  hechos.
 - En las Mac con Intel, onnxruntime queda en 1.23.2, la última versión con paquetes para ellas (lo fija
   `pyproject.toml`). onnxruntime y OpenCV piden macOS 14 en los dos tipos de Mac; `build.py` falla si algo pide más.
 - En Linux no lleva el runtime de C++ de la máquina que lo arma, que pediría su glibc: usa el del sistema y pide glibc

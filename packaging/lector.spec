@@ -22,6 +22,8 @@ MACOS = sys.platform == "darwin"
 WINDOWS = sys.platform == "win32"
 APP_NAME = "Urna Abierta Lector"
 PROGRAM = "urna-abierta-lector"
+# The mark of the reader's screens, made into icons by tools/hacer-iconos.py.
+ICONS = HERE / "iconos"
 
 # rapidocr's configuration, and of its models only the recognition model the reader uses.
 datas = collect_data_files("rapidocr", excludes=["models/*"])
@@ -95,7 +97,7 @@ exe = EXE(
     # Windows and Linux keep a console that says where the reader is; closing it closes the reader.
     # On macOS the program is an app without a window: it opens the browser and nothing else.
     console=not MACOS,
-    icon="NONE" if WINDOWS else None,
+    icon=str(ICONS / "lector.ico") if WINDOWS else None,
     debug=False,
     strip=False,
     upx=False,
@@ -109,7 +111,7 @@ if MACOS:
     app = BUNDLE(
         coll,
         name=f"{APP_NAME}.app",
-        icon=None,
+        icon=str(ICONS / "lector.icns"),
         bundle_identifier="org.urnaabierta.lector",
         version=short_version,
         info_plist={

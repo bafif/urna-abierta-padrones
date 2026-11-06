@@ -9,7 +9,8 @@ from pathlib import Path
 
 import pytest
 
-PACKAGING = Path(__file__).resolve().parent.parent / "packaging"
+ROOT = Path(__file__).resolve().parent.parent
+PACKAGING = ROOT / "packaging"
 
 
 def load(name: str):
@@ -152,3 +153,19 @@ def test_the_notices_name_the_libraries_inside_python(tmp_path, monkeypatch):
     files = {p.relative_to(out).as_posix() for p in written}
     assert {"licenses/python/zlib.txt", "licenses/python/mpdecimal.txt", "licenses/Apache-2.0.txt"} <= files
     assert not any(name.endswith("-2.txt") for name in files)
+
+
+def test_the_icons_are_the_mark_in_every_size_each_system_asks_for():
+    from PIL import Image
+
+    spec = (PACKAGING / "lector.spec").read_text(encoding="utf-8")
+    assert 'icon=str(ICONS / "lector.ico") if WINDOWS' in spec and 'icon=str(ICONS / "lector.icns")' in spec
+    with Image.open(PACKAGING / "iconos" / "lector.ico") as ico:
+        assert {(16, 16), (32, 32), (48, 48), (256, 256)} <= set(ico.info["sizes"])
+    with Image.open(PACKAGING / "iconos" / "lector.icns") as icns:
+        assert {(512, 512, 1), (512, 512, 2)} <= set(icns.info["sizes"])
+        drawn = icns.convert("RGBA")
+    # Transparent corners, and the mark in the colour of «Aula».
+    assert drawn.getpixel((0, 0))[3] == 0
+    assert (0x17, 0x46, 0xC7, 255) in {colour for _, colour in drawn.getcolors(1 << 21)}
+
