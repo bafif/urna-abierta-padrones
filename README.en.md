@@ -77,7 +77,8 @@ The reader opens its screens in the browser and goes step by step, with one ques
 2. **Read it:** the computer reads page by page. It shows which page it is on, how many people it found and roughly how
    long is left. It can be cancelled.
 3. **Review:** it shows the rows that were not clear one at a time, with the image of the row on top and its data below,
-   to fix them or say they are fine. The ones you do not review stay pending, to be reviewed later in the app.
+   to fix them or say they are fine. If the roll has tables or addresses, the table and the address are shown and fixed
+   there too. The ones you do not review stay pending, to be reviewed later in the app.
 4. **Save:** you get a `.padron` file. In Urna Abierta, go into the election and upload it with “Upload the roll”.
 
 **It is private.** The file never leaves your computer, and the reader can only be opened from it, with the address it

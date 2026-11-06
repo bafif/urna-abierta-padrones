@@ -16,11 +16,13 @@ from pathlib import Path
 
 import numpy as np
 import pytest
-from fake_layouts import save_image
+from fake_layouts import listing_page, pdf_bytes, people, save_image
 from fake_roll import PAGE_SIZE, draw_page, fake_rows, find_font, save_pdf
 
+import urna_padrones.lector
 from urna_padrones.lector.server import CSP, FOLDER_PREFIX, PID_FILE, LectorServer, remove_leftovers
 from urna_padrones.lector.session import Session, clean_title, file_name_for
+from urna_padrones.reading import COLUMNS
 
 ROWS_PER_PAGE = 12
 # A document with nine digits cannot be right: that row is always one to review.
@@ -205,6 +207,8 @@ def test_reads_reviews_and_saves(reader, roll_pdf):
     _, doubtful = api(base, "rows?which=doubtful")
     assert len(doubtful["rows"]) == summary["doubtful"]
     bad = everything["rows"][BAD_ROW]
+    # A roll without tables or addresses shows the same fields as always.
+    assert set(bad["values"]) == set(bad["valid"]) == set(COLUMNS)
     assert bad["values"]["document"] == BAD_DOCUMENT
     assert bad["valid"]["document"] is False and bad["needs_review"] is True
     assert bad["page"] == 1
@@ -267,6 +271,52 @@ def test_reads_reviews_and_saves(reader, roll_pdf):
     assert api(base, "reset", {}) == (200, {"ok": True})
     assert copies(folder) == []
     assert api(base, "state")[1]["state"] == "empty"
+
+
+def test_a_roll_with_tables_and_addresses_shows_them_to_fix(reader, tmp_path):
+    base, _ = reader
+    keys = ["order", "document", "name", "table", "address"]
+    headers = ["Nº", "DNI", "Apellido y nombre", "Mesa", "Domicilio"]
+    drawn = people(6, seed=5, tables=(12, 13))
+    drawn[2]["table"] = ""
+    path = tmp_path / "mesas.pdf"
+    path.write_bytes(pdf_bytes([{"content": listing_page(drawn, headers, keys, [40, 80, 160, 330, 380, 560])}]))
+    assert upload(base, path)[0] == 200
+    assert api(base, "read", {}) == (202, {"ok": True})
+    assert wait_for(base, lambda s: s["state"] != "reading")["state"] == "done"
+
+    _, everything = api(base, "rows")
+    rows = everything["rows"]
+    assert len(rows) == len(drawn)
+    assert all(set(row["values"]) == set(row["valid"]) == {*COLUMNS, "table", "address"} for row in rows)
+    assert [row["values"]["table"] for row in rows] == ["12", "12", "", "13", "13", "13"]
+    assert rows[0]["values"]["address"] == drawn[0]["address"]
+    # Whoever is left without a table in a roll with tables is reviewed, and the table can be typed in.
+    blank = rows[2]
+    assert blank["valid"]["table"] is False and blank["needs_review"] is True
+    status, still = api(base, "rows/2", {"values": {"table": "mesa"}})
+    assert status == 200 and still["valid"]["table"] is False and still["reviewed"] is False
+    status, fixed = api(base, "rows/2", {"values": {"table": "Mesa 13", "address": "Calle Corregida 10"}})
+    assert status == 200 and fixed["reviewed"] is True
+    assert fixed["values"]["table"] == "13" and fixed["valid"]["table"] is True
+    assert fixed["values"]["address"] == "Calle Corregida 10"
+
+    status, _, data = request(base + "api/save")
+    assert status == 200
+    with zipfile.ZipFile(io.BytesIO(data)) as archive:
+        electors = [json.loads(line) for line in archive.read("electors.jsonl").decode().splitlines()]
+    assert electors[2]["table"] == "mesa-13" and electors[2]["address"] == "Calle Corregida 10"
+    assert electors[2]["review"] == {"status": "ok"}
+    assert api(base, "reset", {}) == (200, {"ok": True})
+
+
+def test_the_review_card_names_tables_and_addresses_in_both_languages():
+    script = (Path(urna_padrones.lector.__file__).parent / "ui" / "lector.js").read_text(encoding="utf-8")
+    for text in ("'field.table': 'Mesa'", "'field.address': 'Domicilio'", "'field.table': 'Table (mesa)'",
+                 "'field.address': 'Address'", "'why.table': 'Tiene que ser", "'why.table': 'It has to be"):
+        assert script.count(text) == 1, text
+    # They come after the fields every roll has, with the same field component, only when the roll has them.
+    assert "const fieldsOf = (row) =>" in script and "fieldsOf(row).map(" in script
 
 
 def test_a_cancelled_reading_forgets_the_file(reader, roll_pdf):

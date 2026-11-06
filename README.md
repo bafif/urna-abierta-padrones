@@ -77,7 +77,8 @@ El lector abre sus pantallas en el navegador y lleva paso a paso, con una pregun
 2. **Leerlo:** la computadora lee página por página. Muestra por qué página va, cuántas personas encontró y cuánto
    falta, más o menos. Se puede cancelar.
 3. **Revisar:** muestra una por una las filas que no quedaron claras, con la imagen de la fila arriba y sus datos abajo,
-   para corregirlos o decir que están bien. Las que no revises quedan pendientes y se revisan después en la app.
+   para corregirlos o decir que están bien. Si el padrón tiene mesas o domicilios, la mesa y el domicilio también se
+   muestran y se corrigen ahí. Las que no revises quedan pendientes y se revisan después en la app.
 4. **Guardar:** queda un archivo `.padron`. En Urna Abierta, entrás a la elección y lo subís con «Subir el padrón».
 
 **Es privado.** El archivo no sale de tu computadora, y el lector solo se puede abrir desde ella, con la dirección que

@@ -73,6 +73,8 @@
       'field.file_number': 'Legajo',
       'field.program': 'Carrera',
       'field.status': 'Estado',
+      'field.table': 'Mesa',
+      'field.address': 'Domicilio',
       'why.name': 'Tiene que ser «Apellido, Nombre», sin números.',
       'why.document': 'Tienen que ser 7 u 8 números, sin puntos.',
       'why.order': 'Tiene que ser un número.',
@@ -80,6 +82,8 @@
       'why.file_number_check': 'El número después de la barra no corresponde a los otros cuatro: revisalos con la imagen.',
       'why.program': 'Falta la carrera.',
       'why.status': 'Tiene que ser A o P.',
+      'why.table': 'Tiene que ser el número de la mesa, como 12.',
+      'why.address': 'Revisá el domicilio con la imagen.',
       'save.title': 'Guardá el padrón',
       'save.text': 'Queda un archivo para subir a Urna Abierta.',
       'save.name': 'Nombre del padrón',
@@ -172,6 +176,8 @@
       'field.file_number': 'Student number',
       'field.program': 'Degree',
       'field.status': 'Status',
+      'field.table': 'Table (mesa)',
+      'field.address': 'Address',
       'why.name': 'It has to be “Surname, Name”, without numbers.',
       'why.document': 'It has to be 7 or 8 digits, without dots.',
       'why.order': 'It has to be a number.',
@@ -179,6 +185,8 @@
       'why.file_number_check': 'The digit after the slash does not match the other four: check them against the picture.',
       'why.program': 'The degree is missing.',
       'why.status': 'It has to be A or P.',
+      'why.table': 'It has to be the table number, such as 12.',
+      'why.address': 'Check the address against the picture.',
       'save.title': 'Save the roll',
       'save.text': 'You get a file to upload to Urna Abierta.',
       'save.name': 'Name of the roll',
@@ -206,8 +214,13 @@
   const READABLE = /\.(pdf|jpe?g|png|tiff?)$/i;
   const READABLE_TYPES = ['application/pdf', 'image/jpeg', 'image/png', 'image/tiff'];
   const ACCEPTED = ['.pdf', '.jpg', '.jpeg', '.png', '.tif', '.tiff', ...READABLE_TYPES].join(',');
-  // The fields in the order a person reads a row, and how wide each one is on a grid of six.
+  // The fields in the order a person reads a row, and how wide each one is on a grid of six. A roll with tables or
+  // addresses adds them on a line of their own, after the others.
   const FIELDS = [['name', 4], ['order', 2], ['document', 2], ['file_number', 2], ['status', 2], ['program', 6]];
+  const fieldsOf = (row) => {
+    const table = 'table' in row.values;
+    return [...FIELDS, ...(table ? [['table', 2]] : []), ...('address' in row.values ? [['address', table ? 4 : 6]] : [])];
+  };
   const LOGO = '<svg viewBox="0 0 48 48" aria-hidden="true"><path d="M7 15v21a6 6 0 006 6h22a6 6 0 006-6V15" fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round"/><rect x="17" y="4" width="14" height="22" rx="2" fill="currentColor" transform="rotate(8 24 15)"/></svg>';
   const ICONS = {
     flecha: '<path d="M5 12h13M12 6l6 6-6 6"/>',
@@ -302,7 +315,7 @@
       ? `<div class="imagen-fila" role="img" aria-label="${t('review.image')}" data-testid="row-image">
           <div class="recorte"><img src="${image}" alt=""></div><div class="recorte derecha"><img src="${image}" alt=""></div></div>`
       : `<p class="aclara">${t('review.noImage')}</p>`;
-    const fields = FIELDS.map(([name, span]) => {
+    const fields = fieldsOf(row).map(([name, span]) => {
       const wrong = !row.valid[name];
       // A legajo with the right shape that is still wrong has a check digit that does not add up.
       const why = name === 'file_number' && /^[A-Z]-\d{4}\/\d$/.test(String(row.values[name] ?? '')) ? 'why.file_number_check' : `why.${name}`;

@@ -58,8 +58,12 @@ TITLE_GAP = 80
 
 
 def cleaner(column: str, layout: str = FACULTY) -> Callable[[str], fields.Checked]:
-    """How a value of `column` is cleaned and checked in a roll read with `layout`."""
-    return (CLEANERS if layout == FACULTY else HEADER_CLEANERS)[column]
+    """How a value of `column` is cleaned and checked in a roll read with `layout`.
+
+    A table or an address, which the faculty's layout has not got but a title may give and a person may fix, is
+    checked as in any other roll.
+    """
+    return (CLEANERS if layout == FACULTY and column in CLEANERS else HEADER_CLEANERS)[column]
 
 
 @dataclass

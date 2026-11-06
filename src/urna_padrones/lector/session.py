@@ -17,7 +17,7 @@ from ..errors import RollError
 from ..padron import padron_bytes, padron_summary
 from ..pages import check_roll
 from ..reading import COLUMNS, ReadRow, RollReading, read_roll, row_image
-from ..table import CONFIDENCE_CHECKED, SURE_CONFIDENCE
+from ..table import CONFIDENCE_CHECKED, EXTRA, SURE_CONFIDENCE
 
 MAX_PDF = 512 * 1024 * 1024
 CHUNK = 1024 * 1024
@@ -51,6 +51,13 @@ def clean_title(title: str | None) -> str | None:
     return text or None
 
 
+def shown_fields(reading: RollReading) -> tuple[str, ...]:
+    """The values a person sees and may fix in each row: COLUMNS, and a table and an address when the roll has them,
+    from a column or, for the table, from a title."""
+    extra = tuple(c for c in EXTRA if any(c in row.columns or row.values.get(c) for row in reading.rows))
+    return COLUMNS + extra
+
+
 def _remove(path: Path | None) -> None:
     if path is None:
         return
@@ -82,6 +89,7 @@ class Session:
         self.rows_found = 0
         self.started = 0.0
         self.reading: RollReading | None = None
+        self.fields: tuple[str, ...] = COLUMNS
         self.doubtful: list[int] = []
         self.reviewed: set[int] = set()
         self.edited: dict[int, set[str]] = {}
@@ -173,6 +181,7 @@ class Session:
             with self.lock:
                 if self.cancel is cancel:
                     self.reading = reading
+                    self.fields = shown_fields(reading)
                     self.doubtful = [row.index for row in reading.rows if row.needs_review]
                     self.state = "done"
 
@@ -242,8 +251,8 @@ class Session:
         return {
             "index": row.index,
             "page": row.page + 1,
-            "values": {column: row.values.get(column) or "" for column in COLUMNS},
-            "valid": {column: bool(row.valid.get(column, True)) for column in COLUMNS},
+            "values": {column: row.values.get(column) or "" for column in self.fields},
+            "valid": {column: bool(row.valid.get(column, True)) for column in self.fields},
             "unsure": unsure,
             "repaired": row.repaired_file_number and "file_number" not in edited,
             "needs_review": row.needs_review,
@@ -274,13 +283,13 @@ class Session:
         with self.lock:
             row = self._row(index)
             for column, text in values.items():
-                if column not in COLUMNS or not isinstance(text, str):
+                if column not in self.fields or not isinstance(text, str):
                     continue
                 text = text[:MAX_VALUE]
                 if text.strip() != (row.values.get(column) or ""):
                     row.fix(column, text)
                     self.edited.setdefault(index, set()).add(column)
-            if confirm or all(row.valid.get(column, True) for column in COLUMNS):
+            if confirm or all(row.valid.get(column, True) for column in self.fields):
                 return self._confirmed(row)
             return self._row_json(row)
 
