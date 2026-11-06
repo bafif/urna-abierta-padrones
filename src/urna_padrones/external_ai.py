@@ -52,8 +52,10 @@ ATTEMPTS = 3
 # The longest wait before trying again, also when the service asks for a longer one.
 MAX_WAIT = 30.0
 JPEG_QUALITY = 90
-# An answer with more people than this for one page is not a page of a roll.
+# An answer with more people, or more lines of tables, than this for one page is not a page of a roll.
 MAX_ROWS = 400
+# The longest value taken, as the app takes a name or an address: a longer one is not a cell of a roll.
+MAX_VALUE = 200
 # How a row read by a service is told from one read here ("ocr") or taken from the text of a PDF ("text").
 SOURCE = "ia"
 # Only a service on this same computer may be reached without encryption.
@@ -268,9 +270,10 @@ class Service:
             try:
                 answer = json.loads(payload)
                 if not isinstance(answer, dict):
-                    raise _Malformed("not an object")
+                    raise _Malformed("no es un objeto")
                 return parse(answer)
-            except (ValueError, _Malformed) as error:
+            # An answer of a shape nobody expected is never taken, whatever it breaks: it is not the JSON asked for.
+            except (ValueError, TypeError, AttributeError, KeyError, IndexError, RecursionError, _Malformed) as error:
                 detail = str(error) if isinstance(error, _Malformed) else ""
                 failure = AIError(self._malformed(detail))
                 continue
@@ -450,11 +453,16 @@ def _mistral_page(answer: dict) -> AIPage:
         if not isinstance(page, dict) or not isinstance(page.get("markdown"), str):
             raise _Malformed("una página no trae su texto")
         markdown = page["markdown"]
+        apart = page.get("tables") or []
+        if not isinstance(apart, list):
+            raise _Malformed("las tablas de una página no son una lista")
         # A table the service gives apart is in the text as a link to it, such as [tbl-0.md](tbl-0.md).
-        for table in page.get("tables") or []:
+        for table in apart:
             if isinstance(table, dict) and isinstance(table.get("id"), str) and isinstance(table.get("content"), str):
                 markdown = markdown.replace(f"[{table['id']}]({table['id']})", "\n" + table["content"] + "\n")
         tables += markdown_tables(markdown)
+    if sum(len(table.rows) for table in tables) > MAX_ROWS:
+        raise _Malformed(f"trae más de {MAX_ROWS} renglones de tablas en una página")
     return AIPage(tables)
 
 
@@ -609,8 +617,17 @@ def _table_rows(table: AITable, page: int, headers: dict[int, Header], start: in
         if len(filled) == 1 and mesa_in(filled[0]) and table.keys is None:
             title = mesa_in(filled[0])
             continue
-        raw = {key: cell for key, cell in zip(header.keys, cells) if key and cell}
+        # A value with characters a printed roll has not got, or too long to be a cell of one, puts the row up for
+        # review; one too long is also dropped, for the person to type it.
+        raw, odd = {}, False
+        for key, cell in zip(header.keys, cells):
+            value, clean = plain(cell)
+            if key and value:
+                odd = odd or not clean or len(value) > MAX_VALUE
+                if len(value) <= MAX_VALUE:
+                    raw[key] = value
         row = Row(page=page, position=start + len(rows), raw=raw, layout=layout, columns=columns, source=SOURCE)
+        row.unsure = odd
         if not faculty:
             join_name(row)
         # The service gives no confidence: a row is as sure as its values' formats say, never more.

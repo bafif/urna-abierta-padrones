@@ -394,3 +394,37 @@ def test_a_column_named_by_the_answer_is_checked_even_when_every_row_has_it_null
     assert external_ai.answer_table({"rows": []}).rows == []
     with pytest.raises(external_ai._Malformed, match="columns"):
         external_ai.answer_table({"rows": rows})
+
+
+def test_values_a_printed_roll_has_not_got_are_reviewed(fake, tmp_path):
+    rows = [
+        {"order": 1, "name": "Prueba, Ana", "document": "99.000.021", "program": "Ing\x00\x07", "address": "Calle 1"},
+        {"order": 2, "name": "Ejemplo, Luis", "document": "99.000.022", "program": "Ing",
+         "address": "Calle\x1b[2J" + chr(0x202E) + " 1"},
+        {"order": "7" * 5000, "name": "Modelo, Inés", "document": "99.000.023", "program": "Ing",
+         "address": "Pasaje " * 50},
+        {"order": 4, "name": "Muestra, Tomás", "document": "99.000.024", "program": "Ing", "address": "Calle 4"},
+    ]
+    columns = ["order", "name", "document", "program", "address"]
+    service = fake(chat_answer(json.dumps({"columns": columns, "rows": rows})))
+    reading = read_roll(scan(tmp_path), service=OpenAICompatible(KEY, service.url + "/v1", "m"))
+    first, second, third, fourth = reading.rows
+    assert first.values["program"] == "Ing" and second.values["address"] == "Calle [2J 1"
+    # Too long to be a cell: dropped, for the person to type it.
+    assert third.values["address"] is None and third.values["order"] == "3"
+    assert [row.needs_review for row in reading.rows] == [True, True, True, False]
+
+
+@pytest.mark.parametrize("kind, body, said", [
+    ("mistral", answer({"pages": [{"index": 0, "markdown": "| a |", "tables": 5}]}), "no son una lista"),
+    ("mistral", mistral_answer("| Nº | Apellido y nombre | DNI |\n" + "| 1 | Prueba, Ana | 99.000.001 |\n" * 5000),
+     "más de 400 renglones"),
+    ("chat", chat_answer("[" * 100_000 + "]" * 100_000), "no es el JSON pedido"),
+])
+def test_an_answer_of_a_wrong_shape_or_size_is_an_error_in_spanish(fake, tmp_path, kind, body, said):
+    service = fake(body)
+    options = {"attempts": 1, "wait": no_wait}
+    chosen = (OpenAICompatible(KEY, service.url + "/v1", "m", **options) if kind == "chat"
+              else MistralOCR(KEY, service.url, **options))
+    with pytest.raises(AIError, match=said):
+        read_roll(scan(tmp_path), service=chosen)
