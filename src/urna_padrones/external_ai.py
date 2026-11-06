@@ -15,7 +15,9 @@ Two kinds of service:
 - Any service that answers OpenAI's chat completions with images, such as OVHcloud AI Endpoints, Scaleway or
   OpenAI itself. It is asked for strict JSON, one object per person, which is checked before it is used.
 
-Requests have a timeout and are tried again a few times when the service is busy or does not answer.
+Requests go straight to the address chosen: a redirect is refused, and a service on this same computer is
+reached without the proxy the environment may name. They have a timeout, and are tried again a few times when
+the service is busy or does not answer.
 """
 
 import base64
@@ -178,7 +180,10 @@ class Service:
         self.timeout = timeout
         self.attempts = max(1, attempts)
         self.wait = wait
-        self._opener = urllib.request.build_opener(_NoRedirect)
+        # A proxy named by the environment (https_proxy) only tunnels an https:// request, which stays encrypted end
+        # to end; a service on this computer is reached directly, so that no proxy sees what goes to it.
+        handlers = [_NoRedirect()] + ([urllib.request.ProxyHandler({})] if parts.hostname in LOCAL_HOSTS else [])
+        self._opener = urllib.request.build_opener(*handlers)
 
     @property
     def name(self) -> str:

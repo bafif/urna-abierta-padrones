@@ -366,3 +366,15 @@ def test_what_a_refusal_repeats_of_the_key_is_not_shown(fake, tmp_path):
     with pytest.raises(AIError, match="no aceptó el pedido") as error:
         read_roll(scan(tmp_path), service=MistralOCR(KEY, service.url, wait=no_wait))
     assert KEY not in str(error.value) and "Bearer …" in str(error.value) and "\x1b" not in str(error.value)
+
+
+def test_a_service_on_this_computer_is_reached_without_the_proxy(fake, tmp_path, monkeypatch):
+    proxy, target = fake(mistral_answer(MARKDOWN)), fake(mistral_answer(MARKDOWN))
+    for name in ("http_proxy", "HTTP_PROXY", "https_proxy", "HTTPS_PROXY"):
+        monkeypatch.setenv(name, proxy.url)
+    for name in ("no_proxy", "NO_PROXY"):
+        monkeypatch.delenv(name, raising=False)
+    port = target.url.rsplit(":", 1)[1]
+    reading = read_roll(scan(tmp_path), service=MistralOCR(KEY, f"http://localhost:{port}"))
+    assert len(reading.rows) == 3
+    assert proxy.requests == [] and len(target.requests) == 1
