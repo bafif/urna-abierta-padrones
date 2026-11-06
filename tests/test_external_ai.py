@@ -50,8 +50,9 @@ CHAT_ROWS = {
 }
 
 
-def answer(body, status: int = 200, headers: dict | None = None, delay: float = 0.0):
-    return status, body, headers or {}, delay
+def answer(body, status: int = 200, headers: dict | None = None, delay: float = 0.0, drip: float = 0.0):
+    """What the fake service answers: `delay` seconds before it, and `drip` seconds between each byte of the body."""
+    return status, body, headers or {}, delay, drip
 
 
 def mistral_answer(markdown: str) -> tuple:
@@ -65,7 +66,7 @@ def chat_answer(content: str, finish: str = "stop") -> tuple:
 
 class FakeService:
     """A service on 127.0.0.1 that gives the answers it was given, in order, and the last one again once they run
-    out. Each answer is (status, body, headers, seconds to wait before answering); `requests` keeps what came in."""
+    out. Each answer is what answer() gives; `requests` keeps what came in."""
 
     def __init__(self, *answers):
         self.answers = list(answers)
@@ -76,7 +77,8 @@ class FakeService:
             def do_POST(self):
                 body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
                 fake.requests.append({"path": self.path, "headers": dict(self.headers), "body": json.loads(body)})
-                status, payload, headers, delay = fake.answers.pop(0) if len(fake.answers) > 1 else fake.answers[0]
+                chosen = fake.answers.pop(0) if len(fake.answers) > 1 else fake.answers[0]
+                status, payload, headers, delay, drip = chosen
                 time.sleep(delay)
                 data = payload if isinstance(payload, bytes) else json.dumps(payload).encode()
                 try:
@@ -86,7 +88,12 @@ class FakeService:
                     self.send_header("Content-Type", "application/json")
                     self.send_header("Content-Length", str(len(data)))
                     self.end_headers()
-                    self.wfile.write(data)
+                    if not drip:
+                        self.wfile.write(data)
+                    for byte in data if drip else b"":
+                        self.wfile.write(bytes([byte]))
+                        self.wfile.flush()
+                        time.sleep(drip)
                 except OSError:
                     pass  # the client stopped waiting
 
@@ -235,7 +242,7 @@ def test_a_quota_that_ran_out_is_said(fake, tmp_path):
 
 
 def test_a_service_that_does_not_answer_in_time_is_an_error(fake, tmp_path):
-    service = fake(mistral_answer(MARKDOWN)[:3] + (1.5,))
+    service = fake(answer(mistral_answer(MARKDOWN)[1], delay=1.5))
     started = time.monotonic()
     with pytest.raises(AIError, match="no contestó en 0.2 segundos, en 2 intentos"):
         read_roll(scan(tmp_path), service=MistralOCR(KEY, service.url, timeout=0.2, attempts=2, wait=no_wait))
@@ -419,6 +426,7 @@ def test_values_a_printed_roll_has_not_got_are_reviewed(fake, tmp_path):
     ("mistral", answer({"pages": [{"index": 0, "markdown": "| a |", "tables": 5}]}), "no son una lista"),
     ("mistral", mistral_answer("| Nº | Apellido y nombre | DNI |\n" + "| 1 | Prueba, Ana | 99.000.001 |\n" * 5000),
      "más de 400 renglones"),
+    ("mistral", mistral_answer("x" * (external_ai.MAX_ANSWER + 1)), "pasa de 4 MB"),
     ("chat", chat_answer("[" * 100_000 + "]" * 100_000), "no es el JSON pedido"),
 ])
 def test_an_answer_of_a_wrong_shape_or_size_is_an_error_in_spanish(fake, tmp_path, kind, body, said):
@@ -428,3 +436,24 @@ def test_an_answer_of_a_wrong_shape_or_size_is_an_error_in_spanish(fake, tmp_pat
               else MistralOCR(KEY, service.url, **options))
     with pytest.raises(AIError, match=said):
         read_roll(scan(tmp_path), service=chosen)
+
+
+def test_an_answer_that_comes_a_little_at_a_time_has_the_same_time_limit(fake, tmp_path):
+    service = fake(answer(mistral_answer(MARKDOWN)[1], drip=0.05))
+    started = time.monotonic()
+    with pytest.raises(AIError, match="no contestó en 0.3 segundos"):
+        read_roll(scan(tmp_path), service=MistralOCR(KEY, service.url, timeout=0.3, attempts=1, wait=no_wait))
+    assert time.monotonic() - started < 1.5
+
+
+@pytest.mark.parametrize("waiting_for", [
+    answer(mistral_answer(MARKDOWN)[1], delay=5),
+    answer({"message": "Too many requests"}, status=429, headers={"Retry-After": "20"}),
+], ids=["an answer", "the pause before trying again"])
+def test_a_cancelled_reading_stops_waiting_for_the_service_at_once(fake, tmp_path, waiting_for):
+    service = fake(waiting_for)
+    started = time.monotonic()
+    with pytest.raises(RollError) as error:
+        read_roll(scan(tmp_path), service=MistralOCR(KEY, service.url, timeout=30),
+                  cancelled=lambda: bool(service.requests))
+    assert error.value.code == "cancelled" and time.monotonic() - started < 3

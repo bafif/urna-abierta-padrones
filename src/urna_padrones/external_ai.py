@@ -16,8 +16,8 @@ Two kinds of service:
   OpenAI itself. It is asked for strict JSON, one object per person, which is checked before it is used.
 
 Requests go straight to the address chosen: a redirect is refused, and a service on this same computer is
-reached without the proxy the environment may name. They have a timeout, and are tried again a few times when
-the service is busy or does not answer.
+reached without the proxy the environment may name. Each one has a time limit for the whole answer, and is
+tried again a few times when the service is busy or does not answer.
 """
 
 import base64
@@ -26,6 +26,7 @@ import json
 import re
 import socket
 import ssl
+import threading
 import time
 import unicodedata
 import urllib.error
@@ -46,7 +47,7 @@ OPENAI_COMPATIBLE = "openai-compatible"
 KINDS = (MISTRAL, OPENAI_COMPATIBLE)
 MISTRAL_URL = "https://api.eu.mistral.ai"
 MISTRAL_MODEL = "mistral-ocr-latest"
-# Seconds to wait for one answer, and how many times a page is tried in all.
+# Seconds to wait for one whole answer, and how many times a page is tried in all.
 TIMEOUT = 120.0
 ATTEMPTS = 3
 # The longest wait before trying again, also when the service asks for a longer one.
@@ -54,8 +55,12 @@ MAX_WAIT = 30.0
 JPEG_QUALITY = 90
 # An answer with more people, or more lines of tables, than this for one page is not a page of a roll.
 MAX_ROWS = 400
+# The longest answer taken for one page, in bytes: a page of a roll is a small part of it.
+MAX_ANSWER = 4_000_000
 # The longest value taken, as the app takes a name or an address: a longer one is not a cell of a roll.
 MAX_VALUE = 200
+# How often a request being waited for asks whether the reading was cancelled, in seconds.
+POLL_SECONDS = 0.1
 # How a row read by a service is told from one read here ("ocr") or taken from the text of a PDF ("text").
 SOURCE = "ia"
 # Only a service on this same computer may be reached without encryption.
@@ -109,6 +114,10 @@ class _Malformed(Exception):
     """The answer came, but it is not what was asked for."""
 
 
+class _TooLong(Exception):
+    """The answer is longer than any page of a roll can give."""
+
+
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
     """A redirect is an error: following it would send the key and the page to an address nobody chose."""
 
@@ -147,8 +156,10 @@ class Service:
         *,
         timeout: float = TIMEOUT,
         attempts: int = ATTEMPTS,
-        wait: Callable[[float], None] = time.sleep,
+        wait: Callable[[float], None] | None = None,
     ):
+        """`wait(seconds)` makes the pause before trying again, for tests; by default the pause asks the checkpoint
+        of read_page ten times a second, as the wait for an answer does."""
         if not key or not key.strip():
             raise AIError(
                 f"Falta la clave del servicio: guardala en la variable {KEY_VARIABLE}. No va como argumento, para "
@@ -202,8 +213,9 @@ class Service:
     def read_page(self, image: np.ndarray, page: int, checkpoint: Callable[[], None] | None = None) -> AIPage:
         """What the service reads on one page, given as the 2D uint8 array the reader renders.
 
-        `checkpoint` is called before each try: raising from it abandons the page. Raises AIError when the
-        page cannot be read.
+        `checkpoint` is called before each try and ten times a second while an answer or the pause before
+        trying again is waited for: raising from it abandons the page at once. Raises AIError when the page
+        cannot be read.
         """
         raise NotImplementedError
 
@@ -214,7 +226,7 @@ class Service:
         backoff = delay = 1.0
         for attempt in range(self.attempts):
             if attempt:
-                self.wait(min(MAX_WAIT, delay))
+                self._pause(min(MAX_WAIT, delay), checkpoint)
                 backoff *= 2
             delay = backoff
             checkpoint()
@@ -230,8 +242,7 @@ class Service:
                 },
             )
             try:
-                with self._opener.open(request, timeout=self.timeout) as response:
-                    payload = response.read()
+                payload = self._exchange(request, checkpoint)
             except urllib.error.HTTPError as error:
                 status, detail = error.code, self._redact(_detail(error))
                 if status in (401, 403):
@@ -251,6 +262,9 @@ class Service:
                 raise _Refused(status, detail) from None
             except (TimeoutError, socket.timeout):
                 failure = AIError(self._silent())
+                continue
+            except _TooLong:
+                failure = AIError(self._malformed(f"pasa de {MAX_ANSWER // 1_000_000} MB"))
                 continue
             except urllib.error.URLError as error:
                 if isinstance(error.reason, ssl.SSLCertVerificationError):
@@ -279,6 +293,45 @@ class Service:
                 continue
         assert failure is not None
         raise failure
+
+    def _exchange(self, request: urllib.request.Request, checkpoint: Callable[[], None]) -> bytes:
+        """Send a request and wait for its whole answer, for at most `timeout` seconds in all.
+
+        The request is made on a thread of its own, which is waited for here, asking `checkpoint` ten times a
+        second: a reading that is cancelled, or an answer that does not end in time, stops being waited for at
+        once, also one that comes slowly, a little at a time. That thread then ends by itself, and what it gets
+        is not used.
+        """
+        deadline = time.monotonic() + self.timeout
+        outcome: dict = {}
+        finished = threading.Event()
+
+        def run() -> None:
+            try:
+                with self._opener.open(request, timeout=self.timeout) as response:
+                    outcome["payload"] = _read_answer(response, deadline)
+            except Exception as error:
+                outcome["error"] = error
+            finally:
+                finished.set()
+
+        threading.Thread(target=run, name="urna-padrones-ia", daemon=True).start()
+        while not finished.wait(POLL_SECONDS):
+            checkpoint()
+            if time.monotonic() > deadline:
+                raise TimeoutError
+        if "error" in outcome:
+            raise outcome["error"]
+        return outcome["payload"]
+
+    def _pause(self, seconds: float, checkpoint: Callable[[], None]) -> None:
+        if self.wait is not None:
+            self.wait(seconds)
+            return
+        end = time.monotonic() + seconds
+        while (left := end - time.monotonic()) > 0:
+            checkpoint()
+            time.sleep(min(POLL_SECONDS, left))
 
     def _redact(self, text: str) -> str:
         """What a service said, without the key, should it repeat it."""
@@ -394,6 +447,21 @@ def data_url(image: np.ndarray) -> str:
 
 def _visible_ascii(text: str) -> bool:
     return all("!" <= character <= "~" for character in text)
+
+
+def _read_answer(response, deadline: float) -> bytes:
+    """The whole body of an answer, as it comes, until `deadline` (of time.monotonic) or MAX_ANSWER bytes."""
+    parts, size = [], 0
+    while True:
+        if time.monotonic() > deadline:
+            raise TimeoutError
+        part = response.read1(65536)
+        if not part:
+            return b"".join(parts)
+        size += len(part)
+        if size > MAX_ANSWER:
+            raise _TooLong
+        parts.append(part)
 
 
 def plain(text: str) -> tuple[str, bool]:
