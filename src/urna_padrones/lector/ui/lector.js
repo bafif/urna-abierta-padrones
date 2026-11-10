@@ -232,8 +232,11 @@
   const icon = (name) => `<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">${ICONS[name]}</svg>`;
 
   const scheme = matchMedia('(prefers-color-scheme: dark)');
+  /** Spanish when any of the languages the browser prefers is Spanish (es, es-AR, es-419…), English otherwise. */
+  const languageOf = (preferred) => (preferred.some((tag) => String(tag).toLowerCase().split(/[-_]/)[0] === 'es') ? 'es' : 'en');
   const state = {
-    language: 'es',
+    // The computer's languages until the person chooses, and then their choice: the reader remembers it.
+    language: languageOf(navigator.languages?.length ? navigator.languages : [navigator.language ?? '']),
     screen: 'pick',
     mode: scheme.matches ? 'oscuro' : 'claro',
     problem: '',
@@ -411,10 +414,12 @@
     const theme = tema();
     const recipes = Object.entries(window.URNA_TEMA.recetas(theme)).map(([k, v]) => `${k}="${v}"`).join(' ');
     document.documentElement.lang = state.language;
+    document.title = `${t('brand')} · Urna Abierta`;
     const focused = document.activeElement?.dataset?.field;
     const focusedAction = state.screen === renderedScreen ? document.activeElement?.dataset?.action : undefined;
     renderedScreen = state.screen;
-    const problem = state.problem && !screen.keepProblem ? `<p class="problema" role="alert" data-testid="problem">${escape(state.problem)}</p>` : '';
+    // A problem is kept as its key, so that it follows the language if the person changes it.
+    const problem = state.problem && !screen.keepProblem ? `<p class="problema" role="alert" data-testid="problem">${escape(state.problem.key ? t(state.problem.key) : state.problem)}</p>` : '';
     document.getElementById('app').innerHTML = `
       <div class="ventana" ${recipes} style="${window.URNA_TEMA.variables(theme, state.mode, 'plan').replaceAll('"', '&quot;')}">
         ${rail()}
@@ -480,11 +485,11 @@
     state.problem = '';
     const readable = READABLE.test(file.name) || READABLE_TYPES.includes(file.type);
     if (!readable) {
-      state.problem = t('error.not_pdf');
+      state.problem = { key: 'error.not_pdf' };
       return render();
     }
     if (file.size > MAX_PDF) {
-      state.problem = t('error.too_large');
+      state.problem = { key: 'error.too_large' };
       return render();
     }
     state.busy = true;
@@ -492,7 +497,7 @@
     const { status, body } = await call(`pdf?name=${encodeURIComponent(file.name)}`, { method: 'POST', headers: { 'content-type': file.type || 'application/octet-stream' }, body: file });
     state.busy = false;
     if (status !== 200) {
-      state.problem = t(`error.${body.error ?? 'internal'}`);
+      state.problem = { key: `error.${body.error ?? 'internal'}` };
       return render();
     }
     await post('read');
@@ -528,7 +533,7 @@
     const answer = await post(`rows/${row.index}${path}`, body);
     state.busy = false;
     if (answer.status !== 200) {
-      state.problem = t('error.internal');
+      state.problem = { key: 'error.internal' };
       return render();
     }
     state.rows[state.at] = answer.body;
@@ -538,6 +543,8 @@
   const ACTIONS = {
     language: () => {
       state.language = state.language === 'es' ? 'en' : 'es';
+      // Remembered on this computer: the next time the reader opens, it opens in this one.
+      post('language', { language: state.language }).catch(() => undefined);
       render();
     },
     choose: () => document.querySelector('[data-testid="pdf-file"]')?.click(),
@@ -569,7 +576,7 @@
       if (!row) return;
       state.draft = {};
       if (row.reviewed) return nextRow(state.at + 1);
-      state.problem = t('review.stillWrong');
+      state.problem = { key: 'review.stillWrong' };
       render();
     },
     // The file is fetched first, so «Listo» only shows once it really came.
@@ -588,7 +595,7 @@
       }
       state.busy = false;
       if (!data) {
-        state.problem = t('save.failed');
+        state.problem = { key: 'save.failed' };
         return render();
       }
       const name = /filename="([A-Za-z0-9-]+\.padron)"/.exec(response.headers.get('content-disposition') ?? '')?.[1] ?? 'padron.padron';
@@ -669,5 +676,11 @@
     if (state.screen !== 'closed' && state.screen !== 'lost') call('state').catch(() => undefined);
   }, 5 * 60 * 1_000);
 
-  render();
+  // The language chosen the last time, if there was one, before drawing anything.
+  call('language')
+    .then(({ body }) => {
+      if (body.language === 'es' || body.language === 'en') state.language = body.language;
+    })
+    .catch(() => undefined)
+    .finally(render);
 })();

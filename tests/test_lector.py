@@ -455,3 +455,20 @@ def test_self_test_fails_without_the_model(tmp_path):
         env=env,
     )
     assert done.returncode == 1 and done.stdout == ""
+
+
+def test_the_language_chosen_on_the_screens_is_remembered_for_the_next_time(reader):
+    base, _ = reader
+    preferences = Path(os.environ["URNA_CONFIG_DIR"]) / "preferencias.json"
+    preferences.unlink(missing_ok=True)
+    assert api(base, "language") == (200, {"language": None})
+    assert api(base, "language", {"language": "pt"})[0] == 400
+    assert api(base, "language", {"language": "en"}) == (200, {"ok": True})
+    assert api(base, "language") == (200, {"language": "en"})
+    # Next to what the installer keeps there, which stays.
+    preferences.write_text(json.dumps({"vision": "local", "language": "en"}), encoding="utf-8")
+    assert api(base, "language", {"language": "es"}) == (200, {"ok": True})
+    assert json.loads(preferences.read_text(encoding="utf-8")) == {"vision": "local", "language": "es"}
+    if os.name != "nt":
+        assert preferences.stat().st_mode & 0o777 == 0o600
+    preferences.unlink()

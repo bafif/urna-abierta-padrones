@@ -10,6 +10,8 @@ import multiprocessing
 import os
 import sys
 
+from ..i18n import add_language_option, forced_language, localize_argparse, set_language, t
+
 PORT_VARIABLE = "URNA_LECTOR_PORT"
 NO_BROWSER_VARIABLE = "URNA_NO_BROWSER"
 BANNER = (
@@ -22,18 +24,20 @@ BANNER = (
 def _port(text: str) -> int:
     value = int(text)
     if not 0 <= value <= 65535:
-        raise argparse.ArgumentTypeError("tiene que estar entre 0 y 65535")
+        raise argparse.ArgumentTypeError(t("lector.port_range"))
     return value
 
 
 def parse(argv: list[str] | None) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        prog="urna-padrones-lector",
-        description="Lector de padrones escaneados, con sus pantallas en el navegador. Nada sale de esta computadora.",
-    )
-    parser.add_argument("--port", type=_port, help=f"puerto en 127.0.0.1 (o {PORT_VARIABLE}; si no, uno libre al azar)")
-    parser.add_argument("--no-browser", action="store_true", help=f"no abrir el navegador (o {NO_BROWSER_VARIABLE}=1)")
-    parser.add_argument("--self-test", action="store_true", help="comprobar que el lector funciona, sin red, y salir")
+    argv = sys.argv[1:] if argv is None else argv
+    if forced := forced_language(argv):
+        set_language(forced)
+    localize_argparse()
+    parser = argparse.ArgumentParser(prog="urna-padrones-lector", description=t("lector.description"))
+    parser.add_argument("--port", type=_port, help=t("lector.port", variable=PORT_VARIABLE))
+    parser.add_argument("--no-browser", action="store_true", help=t("lector.no_browser", variable=NO_BROWSER_VARIABLE))
+    parser.add_argument("--self-test", action="store_true", help=t("lector.self_test"))
+    add_language_option(parser)
     args = parser.parse_args(argv)
     if args.port is None:
         args.port = _port(os.environ.get(PORT_VARIABLE) or "0")

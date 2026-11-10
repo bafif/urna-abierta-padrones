@@ -26,6 +26,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
 from ..errors import RollError
+from ..i18n import LANGUAGES, t
 from .session import MAX_PDF, IncompleteUpload, NoRows, Session
 
 IDLE_SECONDS = 30 * 60
@@ -43,6 +44,39 @@ TYPES = {
 ROW_IMAGE = re.compile(r"rows/(\d{1,7})/image")
 ROW_EDIT = re.compile(r"rows/(\d{1,7})")
 ROW_OK = re.compile(r"rows/(\d{1,7})/ok")
+
+
+def preferences_file() -> Path:
+    """Where the reader and the installer of Urna Abierta keep what the person chose on this computer."""
+    return Path(os.environ.get("URNA_CONFIG_DIR") or Path.home() / ".urna-abierta") / "preferencias.json"
+
+
+def _preferences() -> dict:
+    try:
+        saved = json.loads(preferences_file().read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return saved if isinstance(saved, dict) else {}
+
+
+def saved_language() -> str | None:
+    """The language chosen before, here or in the installer, if any."""
+    language = _preferences().get("language")
+    return language if language in LANGUAGES else None
+
+
+def remember_language(language: str) -> None:
+    """Kept next to the other preferences. Only a preference: if it cannot be written, the browser decides again."""
+    saved = {**_preferences(), "language": language}
+    try:
+        preferences_file().parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        descriptor = os.open(preferences_file(), os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            json.dump(saved, handle)
+        # A file that was already there keeps its permissions when opened: it goes to owner-only too.
+        os.chmod(preferences_file(), 0o600)
+    except OSError:
+        pass
 
 
 def load_assets() -> dict[str, bytes]:
@@ -279,6 +313,11 @@ class Handler(BaseHTTPRequestHandler):
                 body = self._body()
             except (ValueError, TypeError):
                 return self._json(400, {"error": "bad_request"})
+            if path == "language":
+                if body.get("language") not in LANGUAGES:
+                    return self._json(400, {"error": "bad_request"})
+                remember_language(body["language"])
+                return self._json(200, {"ok": True})
             if path == "read":
                 return self._json(202, {"ok": True}) if session.start() else self._json(409, {"error": "nothing_to_read"})
             if path == "cancel":
@@ -308,6 +347,8 @@ class Handler(BaseHTTPRequestHandler):
         session = self.server.session
         if path == "state":
             return self._json(200, session.status())
+        if path == "language":
+            return self._json(200, {"language": saved_language()})
         if path == "rows":
             which = query.get("which", ["all"])[0]
             return self._json(200, {"rows": session.rows(which)})
@@ -353,7 +394,7 @@ def serve(port: int = 0, open_in_browser: bool = True, idle_seconds: float = IDL
     try:
         server = LectorServer(session, port=port, idle_seconds=idle_seconds)
     except OSError:
-        print(f"No pude usar el puerto {port} de esta computadora: probá con otro o sin --port.", file=sys.stderr)
+        print(t("lector.port_busy", port=port), file=sys.stderr)
         shutil.rmtree(folder, ignore_errors=True)
         return 1
 
