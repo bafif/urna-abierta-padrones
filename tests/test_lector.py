@@ -121,7 +121,7 @@ def test_screens_come_with_a_strict_policy(reader):
     for name in ("lector.js", "lector.css", "tema.css", "temas.js", "aplicar-tema.js"):
         assert request(base + name)[0] == 200
     assert request(base + "fuentes/atkinson-hyperlegible-next-latin-wght-normal.woff2")[0] == 200
-    for name in ("README.md", "../server.py", "fuentes/atkinson-hyperlegible-next.LICENSE.txt", "muestra.png"):
+    for name in ("README.md", "README.en.md", "../server.py", "fuentes/atkinson-hyperlegible-next.LICENSE.txt", "muestra.png"):
         assert request(base + name)[0] == 404
 
 

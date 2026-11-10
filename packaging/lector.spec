@@ -29,7 +29,7 @@ ICONS = HERE / "iconos"
 datas = collect_data_files("rapidocr", excludes=["models/*"])
 datas.append((str(bundled_model()), "rapidocr/models"))
 # The reader's screens, its font with its license, and the two sample images of the self test.
-datas += collect_data_files("urna_padrones", excludes=["**/README.md"])
+datas += collect_data_files("urna_padrones", excludes=["**/README*.md"])
 
 a = Analysis(
     [str(HERE / "launcher.py")],
