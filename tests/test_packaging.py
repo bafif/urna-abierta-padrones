@@ -185,3 +185,16 @@ def test_nothing_the_reader_runs_imports_setuptools():
             assert not {name.split(".")[0] for name in names} & left_out, source
     spec = (PACKAGING / "lector.spec").read_text(encoding="utf-8")
     assert all(f'"{name}",' in spec for name in left_out)
+
+
+def test_a_release_says_what_to_download_in_both_languages():
+    root = Path(__file__).resolve().parents[1]
+    workflow = (root / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+    notes = (root / ".github" / "release-notes.md").read_text(encoding="utf-8")
+    assert '--draft --generate-notes --notes-file "$RUNNER_TEMP/notes.md"' in workflow
+    assert "en español y en inglés" in notes and "in Spanish and English" in notes
+    # Each part points to the README of its language, at a heading that exists.
+    for readme, heading in (("README.md", "## Descargar"), ("README.en.md", "## Download")):
+        anchor = heading.removeprefix("## ").lower()
+        assert f"/{readme}#{anchor}" in notes
+        assert f"\n{heading}\n" in (root / readme).read_text(encoding="utf-8")
