@@ -1,5 +1,7 @@
 """Why a roll could not be read: a code a program can act on, and a message a person can read."""
 
+from .i18n import language
+
 MESSAGES = {
     "not_pdf": (
         "El archivo no es un PDF ni una imagen JPG, PNG o TIFF.",
@@ -26,7 +28,7 @@ MESSAGES = {
 
 
 class RollError(Exception):
-    """A roll that cannot be read. `code` is one of MESSAGES; str() gives the Spanish message."""
+    """A roll that cannot be read. `code` is one of MESSAGES; str() gives the message in the language of the messages."""
 
     def __init__(self, code: str):
         if code not in MESSAGES:
@@ -43,4 +45,4 @@ class RollError(Exception):
         return MESSAGES[self.code][1]
 
     def __str__(self) -> str:
-        return self.message
+        return self.message if language() == "es" else self.message_en

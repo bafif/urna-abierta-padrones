@@ -7,8 +7,9 @@ import sys
 import time
 from pathlib import Path
 
-from . import external_ai, quality
+from . import external_ai, i18n, quality
 from .external_ai import AIError
+from .i18n import TEXTS, t
 from .padron import extraction_of, write_padron
 from .reading import RollError, read_roll
 from .reference import SpreadsheetError, read_reference
@@ -21,12 +22,13 @@ def inside_git_repo(path: Path) -> bool:
 def positive(text: str) -> int:
     value = int(text)
     if value < 1:
-        raise argparse.ArgumentTypeError("tiene que ser 1 o más")
+        raise argparse.ArgumentTypeError(t("cli.positive"))
     return value
 
 
 def show_progress(done: int, total: int) -> None:
-    print(f"\rpágina {done} de {total}", end="\n" if done == total else "", file=sys.stderr, flush=True)
+    line = t("cli.progress", done=done, total=total)
+    print(f"\r{line}", end="\n" if done == total else "", file=sys.stderr, flush=True)
 
 
 def chosen_service(args: argparse.Namespace) -> external_ai.Service | int | None:
@@ -37,7 +39,7 @@ def chosen_service(args: argparse.Namespace) -> external_ai.Service | int | None
     """
     if args.ia is None:
         if args.ia_url or args.ia_model or args.accept_sending:
-            print("--ia-url, --ia-modelo y --acepto-enviar van con --ia.", file=sys.stderr)
+            print(t("cli.ai_alone"), file=sys.stderr)
             return 2
         return None
     try:
@@ -47,14 +49,14 @@ def chosen_service(args: argparse.Namespace) -> external_ai.Service | int | None
         return 2
     print(external_ai.warning(service), file=sys.stderr)
     if not args.accept_sending:
-        print("Para seguir, agregá --acepto-enviar. No se mandó nada.", file=sys.stderr)
+        print(t("cli.accept"), file=sys.stderr)
         return 2
     return service
 
 
 def extract(args: argparse.Namespace) -> int:
     if inside_git_repo(args.out) and not args.allow_inside_repo:
-        print("La salida tiene datos personales y queda dentro de un repo de git: elegí otra carpeta.", file=sys.stderr)
+        print(t("cli.records_in_repo"), file=sys.stderr)
         return 2
     service = chosen_service(args)
     if isinstance(service, int):
@@ -78,29 +80,31 @@ def extract(args: argparse.Namespace) -> int:
     with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as handle:
         for record in reading.records():
             handle.write(json.dumps(record, ensure_ascii=False) + "\n")
-    summary = (f"{len(reading.rows)} filas de {reading.pages_read} páginas en {time.monotonic() - started:.0f} s; "
-               f"páginas sin tabla: {len(reading.pages_without_table)}; "
-               f"números de orden inferidos: {reading.inferred_orders}")
+    summary = t("cli.summary", rows=len(reading.rows), pages=reading.pages_read,
+                seconds=f"{time.monotonic() - started:.0f}", without=len(reading.pages_without_table),
+                inferred=reading.inferred_orders)
     if reading.pages_with_text:
-        summary += f"; páginas con texto: {len(reading.pages_with_text)}"
+        summary += t("cli.summary.text", count=len(reading.pages_with_text))
     if reading.tables():
-        summary += f"; mesas: {len(reading.tables())}"
+        summary += t("cli.summary.tables", count=len(reading.tables()))
     if service is not None:
-        summary += f"; páginas mandadas a {service.shown}: {len(reading.pages_sent)}"
+        summary += t("cli.summary.sent", service=service.shown, count=len(reading.pages_sent))
     print(summary)
     return 0
 
 
 def to_padron(args: argparse.Namespace) -> int:
     if inside_git_repo(args.out) and not args.allow_inside_repo:
-        print("El padrón tiene datos personales y queda dentro de un repo de git: elegí otra carpeta.", file=sys.stderr)
+        print(t("cli.padron_in_repo"), file=sys.stderr)
         return 2
     records = quality.load_records(args.records)
     summary = write_padron(records, args.out, args.title)
-    tables = f"; {summary['tables']} mesas" if summary.get("tables") else ""
+    tables = t("cli.padron.tables", count=summary["tables"]) if summary.get("tables") else ""
     extraction = extraction_of(records)
-    seen = f"; lo vio una IA externa: {extraction.get('provider', 'sí')}" if extraction["external_ai"] else ""
-    print(f"{summary['people']} personas; {summary['to_review']} para revisar{tables}{seen}")
+    seen = ""
+    if extraction["external_ai"]:
+        seen = t("cli.padron.seen", provider=extraction.get("provider", t("cli.padron.seen.yes")))
+    print(t("cli.padron", people=summary["people"], review=summary["to_review"]) + tables + seen)
     return 0
 
 
@@ -119,54 +123,79 @@ def show_verify(args: argparse.Namespace) -> int:
     try:
         reference = read_reference(args.spreadsheet)
     except (SpreadsheetError, OSError, ValueError) as error:
-        print(f"No se pudo leer la planilla: {error}", file=sys.stderr)
+        print(t("cli.spreadsheet", error=error), file=sys.stderr)
         return 1
     result, rows = quality.verify(quality.load_records(args.records), reference)
+    result["spreadsheet"] = {said(what): count for what, count in result["spreadsheet"].items()}
     print(json.dumps(result, ensure_ascii=False, indent=1))
     if args.rows:
         # Only row numbers of the person's own spreadsheet and what to check there, never a value.
         for row, what in rows.items():
-            print(f"fila {row}: {'; '.join(what)}")
+            print(t("cli.row", row=row, what="; ".join(said(each) for each in what)))
     return 0
 
 
+# quality writes what it finds in a spreadsheet as the Spanish texts of i18n: here it goes to the chosen language.
+_CHECKS = {TEXTS["es"][key]: key for key in TEXTS["es"] if key.startswith("check.") and "{" not in TEXTS["es"][key]}
+_FIELDS = {TEXTS["es"][key]: key for key in ("field.name", "field.document", "field.file_number")}
+_DIFFERS = TEXTS["es"]["check.differs"].split("{")[0]
+
+
+def said(what: str) -> str:
+    """Something quality found, in the language of the messages."""
+    if what in _CHECKS:
+        return t(_CHECKS[what])
+    if what.startswith(_DIFFERS):
+        fields = what.removeprefix(_DIFFERS).split(", ")
+        named = (t(_FIELDS[field]) if field in _FIELDS else field for field in fields)
+        return t("check.differs", fields=", ".join(named))
+    return what
+
+
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="urna-padrones", description=__doc__)
+    argv = sys.argv[1:] if argv is None else argv
+    # Before the parser exists: its help is already in the language asked for.
+    if forced := i18n.forced_language(argv):
+        i18n.set_language(forced)
+    i18n.localize_argparse()
+    parser = argparse.ArgumentParser(prog="urna-padrones", description=t("cli.description"))
+    i18n.add_language_option(parser)
+    # Also after the command, where it is easy to add; the one before it is kept if this one is not given.
+    language = {"default": argparse.SUPPRESS}
     commands = parser.add_subparsers(required=True)
-    command = commands.add_parser("extract", help="extrae las filas de un padrón en PDF o en fotos")
-    command.add_argument("pdf", type=Path, metavar="archivo", help="PDF escaneado o con texto, o imagen JPG, PNG o TIFF")
-    command.add_argument("--out", type=Path, required=True)
-    command.add_argument("--pages", type=positive)
-    command.add_argument("--workers", type=positive, default=2)
-    command.add_argument("--allow-inside-repo", action="store_true")
-    command.add_argument("--ia", choices=external_ai.KINDS,
-                         help="lee las páginas con un servicio de IA externo, con tu clave en "
-                              f"{external_ai.KEY_VARIABLE} (sin esto, todo se lee en tu computadora)")
-    command.add_argument("--ia-url", help="dirección del servicio, como https://api.ejemplo.com/v1 (para mistral, "
-                                          f"si no se dice, {external_ai.MISTRAL_URL})")
-    command.add_argument("--ia-modelo", dest="ia_model",
-                         help=f"modelo del servicio (para mistral, si no se dice, {external_ai.MISTRAL_MODEL})")
-    command.add_argument("--acepto-enviar", dest="accept_sending", action="store_true",
-                         help="confirma que el padrón se manda a ese servicio, después de leer el aviso")
+    command = commands.add_parser("extract", help=t("help.extract"), description=t("help.extract"))
+    command.add_argument("pdf", type=Path, metavar=t("meta.file"), help=t("help.file"))
+    command.add_argument("--out", type=Path, required=True, help=t("help.out"))
+    command.add_argument("--pages", type=positive, help=t("help.pages"))
+    command.add_argument("--workers", type=positive, default=2, help=t("help.workers"))
+    command.add_argument("--allow-inside-repo", action="store_true", help=t("help.allow_inside_repo"))
+    command.add_argument("--ia", choices=external_ai.KINDS, help=t("help.ia", variable=external_ai.KEY_VARIABLE))
+    command.add_argument("--ia-url", help=t("help.ia_url", url=external_ai.MISTRAL_URL))
+    command.add_argument("--ia-modelo", dest="ia_model", help=t("help.ia_model", model=external_ai.MISTRAL_MODEL))
+    command.add_argument("--acepto-enviar", dest="accept_sending", action="store_true", help=t("help.accept"))
+    i18n.add_language_option(command, **language)
     command.set_defaults(run=extract)
-    command = commands.add_parser("padron", help="arma el archivo .padron que se sube a Urna Abierta")
-    command.add_argument("records", type=Path)
-    command.add_argument("--out", type=Path, required=True)
-    command.add_argument("--title")
-    command.add_argument("--allow-inside-repo", action="store_true")
+    command = commands.add_parser("padron", help=t("help.padron"), description=t("help.padron"))
+    command.add_argument("records", type=Path, help=t("help.records"))
+    command.add_argument("--out", type=Path, required=True, help=t("help.padron_out"))
+    command.add_argument("--title", help=t("help.title"))
+    command.add_argument("--allow-inside-repo", action="store_true", help=t("help.allow_inside_repo"))
+    i18n.add_language_option(command, **language)
     command.set_defaults(run=to_padron)
-    command = commands.add_parser("report", help="muestra la calidad de una extracción")
-    command.add_argument("records", type=Path)
+    command = commands.add_parser("report", help=t("help.report"), description=t("help.report"))
+    command.add_argument("records", type=Path, help=t("help.records"))
+    i18n.add_language_option(command, **language)
     command.set_defaults(run=show_report)
-    command = commands.add_parser("crosscheck", help="compara dos extracciones que se solapan")
-    command.add_argument("first", type=Path)
-    command.add_argument("second", type=Path)
+    command = commands.add_parser("crosscheck", help=t("help.crosscheck"), description=t("help.crosscheck"))
+    command.add_argument("first", type=Path, help=t("help.first"))
+    command.add_argument("second", type=Path, help=t("help.second"))
+    i18n.add_language_option(command, **language)
     command.set_defaults(run=show_crosscheck)
-    command = commands.add_parser("verify", help="compara una extracción con el padrón tipeado en una planilla")
-    command.add_argument("records", type=Path)
-    command.add_argument("spreadsheet", type=Path, help="planilla .xlsx o .csv con nombre, documento y legajo")
-    command.add_argument("--filas", dest="rows", action="store_true",
-                         help="además, lista las filas de la planilla para revisar (sin mostrar los datos)")
+    command = commands.add_parser("verify", help=t("help.verify"), description=t("help.verify"))
+    command.add_argument("records", type=Path, help=t("help.records"))
+    command.add_argument("spreadsheet", type=Path, help=t("help.spreadsheet"))
+    command.add_argument("--filas", dest="rows", action="store_true", help=t("help.rows"))
+    i18n.add_language_option(command, **language)
     command.set_defaults(run=show_verify)
     args = parser.parse_args(argv)
     return args.run(args)

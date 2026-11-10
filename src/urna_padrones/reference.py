@@ -12,6 +12,8 @@ import xml.etree.ElementTree as ET
 import zipfile
 from pathlib import Path
 
+from .i18n import t
+
 MAIN = "{http://schemas.openxmlformats.org/spreadsheetml/2006/main}"
 RELS = "{http://schemas.openxmlformats.org/package/2006/relationships}"
 DOC_RELS = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}"
@@ -47,7 +49,7 @@ def _columns(cells: list[str]) -> dict[str, int] | None:
 def _people(rows: list[tuple[int, list[str]]]) -> list[dict]:
     header = next((i for i, (_, cells) in enumerate(rows[:HEADER_SEARCH]) if _columns(cells)), None)
     if header is None:
-        raise SpreadsheetError("No encontré una columna con el nombre en las primeras filas.")
+        raise SpreadsheetError(t("sheet.no_name"))
     columns = _columns(rows[header][1])
     people = []
     for line, cells in rows[header + 1 :]:
@@ -75,10 +77,10 @@ def _xlsx_rows(path: Path) -> list[tuple[int, list[str]]]:
     try:
         book = zipfile.ZipFile(path)
     except zipfile.BadZipFile as error:
-        raise SpreadsheetError("El archivo no es una planilla .xlsx.") from error
+        raise SpreadsheetError(t("sheet.not_xlsx")) from error
     with book:
         if sum(info.file_size for info in book.infolist()) > MAX_UNPACKED:
-            raise SpreadsheetError("La planilla es demasiado grande para leerla.")
+            raise SpreadsheetError(t("sheet.too_large"))
         names = set(book.namelist())
         shared = []
         if "xl/sharedStrings.xml" in names:
@@ -89,7 +91,7 @@ def _xlsx_rows(path: Path) -> list[tuple[int, list[str]]]:
         targets = {link.get("Id"): link.get("Target", "") for link in links.findall(RELS + "Relationship")}
         first = workbook.find(f"{MAIN}sheets/{MAIN}sheet")
         if first is None:
-            raise SpreadsheetError("La planilla no tiene hojas.")
+            raise SpreadsheetError(t("sheet.no_sheets"))
         target = targets.get(first.get(DOC_RELS + "id"), "").lstrip("/")
         target = target if target.startswith("xl/") else f"xl/{target}"
         sheet = ET.fromstring(book.read(target))
@@ -143,7 +145,7 @@ def read_reference(path: Path) -> list[dict]:
     elif suffix == ".csv":
         rows = _csv_rows(path)
     else:
-        raise SpreadsheetError("La planilla tiene que ser .xlsx o .csv.")
+        raise SpreadsheetError(t("sheet.kind"))
     if not rows:
-        raise SpreadsheetError("La planilla está vacía.")
+        raise SpreadsheetError(t("sheet.empty"))
     return _people(rows)

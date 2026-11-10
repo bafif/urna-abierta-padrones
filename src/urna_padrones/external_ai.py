@@ -39,6 +39,7 @@ import cv2
 import numpy as np
 
 from .headers import Header, mesa_in, recognise
+from .i18n import t
 from .table import BY_HEADER, COLUMNS, FACULTY, Row, fits_faculty, is_header, is_person, join_name
 
 KEY_VARIABLE = "URNA_PADRONES_IA_CLAVE"
@@ -161,33 +162,24 @@ class Service:
         """`wait(seconds)` makes the pause before trying again, for tests; by default the pause asks the checkpoint
         of read_page ten times a second, as the wait for an answer does."""
         if not key or not key.strip():
-            raise AIError(
-                f"Falta la clave del servicio: guardala en la variable {KEY_VARIABLE}. No va como argumento, para "
-                "que no quede en el historial de la terminal."
-            )
+            raise AIError(t("ai.no_key", variable=KEY_VARIABLE))
         # A key goes in a header, which takes only plain letters, numbers and signs: anything else would stop the
         # request with an error that shows the key.
         if not _visible_ascii(key.strip()):
-            raise AIError(
-                f"La clave de {KEY_VARIABLE} tiene espacios, saltos de línea o letras que una clave no lleva: guardá "
-                "solo la clave, en una línea."
-            )
+            raise AIError(t("ai.odd_key", variable=KEY_VARIABLE))
         if not model or not model.strip():
-            raise AIError("Falta el modelo: decí cuál con --ia-modelo, con el nombre que le da el servicio.")
+            raise AIError(t("ai.no_model"))
         if not _visible_ascii(url.strip()):
-            raise AIError("La dirección del servicio tiene espacios o letras que una dirección no lleva.")
+            raise AIError(t("ai.odd_url"))
         parts = urllib.parse.urlsplit(url.strip())
         if parts.scheme not in ("https", "http") or not parts.hostname:
-            raise AIError("La dirección del servicio tiene que ser como https://api.ejemplo.com/v1.")
+            raise AIError(t("ai.bad_url"))
         if parts.username or parts.password:
-            raise AIError(f"La dirección no puede llevar usuario ni contraseña: la clave va en {KEY_VARIABLE}.")
+            raise AIError(t("ai.url_login", variable=KEY_VARIABLE))
         if parts.scheme == "http" and parts.hostname not in LOCAL_HOSTS:
-            raise AIError(
-                "La dirección tiene que empezar con https://: con http:// el padrón viajaría sin cifrar. Solo un "
-                "servicio en esta misma computadora puede usar http://."
-            )
+            raise AIError(t("ai.plain_http"))
         if parts.query or parts.fragment:
-            raise AIError("La dirección del servicio no lleva nada después de un «?» ni de un «#».")
+            raise AIError(t("ai.url_query"))
         self.key = key.strip()
         self.url = urllib.parse.urlunsplit((parts.scheme, parts.netloc, parts.path.rstrip("/"), "", ""))
         self.host = parts.netloc
@@ -246,9 +238,7 @@ class Service:
             except urllib.error.HTTPError as error:
                 status, detail = error.code, self._redact(_detail(error))
                 if status in (401, 403):
-                    raise AIError(
-                        f"{self.shown} rechazó la clave ({status}): fijate que sea de ese servicio y que siga activa."
-                    ) from None
+                    raise AIError(t("ai.key_refused", service=self.shown, status=status)) from None
                 if status == 402 or (status == 429 and "quota" in detail.lower()):
                     raise AIError(self._quota()) from None
                 if status == 429 or status >= 500:
@@ -256,21 +246,17 @@ class Service:
                     delay = _retry_after(error, backoff)
                     continue
                 if 300 <= status < 400:
-                    raise AIError(
-                        f"{self.host} manda a otra dirección ({status}): poné en --ia-url la dirección final."
-                    ) from None
+                    raise AIError(t("ai.redirect", host=self.host, status=status)) from None
                 raise _Refused(status, detail) from None
             except (TimeoutError, socket.timeout):
                 failure = AIError(self._silent())
                 continue
             except _TooLong:
-                failure = AIError(self._malformed(f"pasa de {MAX_ANSWER // 1_000_000} MB"))
+                failure = AIError(self._malformed(t("answer.too_long", megabytes=MAX_ANSWER // 1_000_000)))
                 continue
             except urllib.error.URLError as error:
                 if isinstance(error.reason, ssl.SSLCertVerificationError):
-                    raise AIError(
-                        f"No se pudo comprobar el certificado de {self.host}: no se mandó nada. Revisá la dirección."
-                    ) from None
+                    raise AIError(t("ai.certificate", host=self.host)) from None
                 timed_out = isinstance(error.reason, (TimeoutError, socket.timeout))
                 failure = AIError(self._silent() if timed_out else self._unreachable())
                 continue
@@ -280,11 +266,11 @@ class Service:
             except ValueError:
                 # The request could not be put together, as with a header a server cannot take; what the error says
                 # may hold the key, so it is not shown.
-                raise AIError(f"No se pudo armar el pedido a {self.host}: revisá la dirección y la clave.") from None
+                raise AIError(t("ai.cannot_build", host=self.host)) from None
             try:
                 answer = json.loads(payload)
                 if not isinstance(answer, dict):
-                    raise _Malformed("no es un objeto")
+                    raise _Malformed(t("answer.not_object"))
                 return parse(answer)
             # An answer of a shape nobody expected is never taken, whatever it breaks: it is not the JSON asked for.
             except (ValueError, TypeError, AttributeError, KeyError, IndexError, RecursionError, _Malformed) as error:
@@ -339,30 +325,24 @@ class Service:
 
     def _refused(self, refused: _Refused) -> AIError:
         detail = f": {refused.detail}" if refused.detail else ""
-        hint = " Revisá --ia-url y --ia-modelo." if refused.status in (404, 405) else ""
-        return AIError(f"{self.shown} no aceptó el pedido ({refused.status}){detail}.{hint}")
+        hint = t("ai.refused.hint") if refused.status in (404, 405) else ""
+        return AIError(t("ai.refused", service=self.shown, status=refused.status, detail=detail, hint=hint))
 
     def _quota(self) -> str:
-        return (
-            f"{self.shown} dice que se terminó la cuota de tu clave o que hubo demasiados pedidos seguidos: esperá "
-            "un rato, o revisá tu plan en el servicio."
-        )
+        return t("ai.quota", service=self.shown)
 
     def _broken(self, status: int) -> str:
-        return f"{self.shown} tuvo un problema ({status}) en {self.attempts} intentos: probá más tarde."
+        return t("ai.broken", service=self.shown, status=status, attempts=self.attempts)
 
     def _silent(self) -> str:
-        return f"{self.host} no contestó en {self.timeout:g} segundos, en {self.attempts} intentos: probá más tarde."
+        return t("ai.silent", host=self.host, seconds=self.timeout, attempts=self.attempts)
 
     def _unreachable(self) -> str:
-        return f"No se pudo llegar a {self.host}: revisá la conexión a internet y la dirección del servicio."
+        return t("ai.unreachable", host=self.host)
 
     def _malformed(self, detail: str) -> str:
         why = f" ({detail})" if detail else ""
-        return (
-            f"La respuesta de {self.shown} no es el JSON pedido{why}, en {self.attempts} intentos: no se usó nada de "
-            "esa página."
-        )
+        return t("ai.malformed", service=self.shown, why=why, attempts=self.attempts)
 
 
 class MistralOCR(Service):
@@ -394,7 +374,7 @@ class OpenAICompatible(Service):
 
     def __init__(self, key: str, url: str | None = None, model: str | None = None, **options):
         if not url:
-            raise AIError("Falta la dirección del servicio: decí cuál con --ia-url, como https://api.ejemplo.com/v1.")
+            raise AIError(t("ai.no_url"))
         super().__init__(key, url.rstrip("/").removesuffix("/chat/completions"), model or "", **options)
         self._refused_options: set[str] = set()
 
@@ -421,27 +401,19 @@ def service(kind: str, key: str, url: str | None = None, model: str | None = Non
         return MistralOCR(key, url, model, **options)
     if kind == OPENAI_COMPATIBLE:
         return OpenAICompatible(key, url, model, **options)
-    raise AIError(f"No conozco el servicio «{kind}»: puede ser {' o '.join(KINDS)}.")
+    raise AIError(t("ai.unknown", kind=kind, kinds=t("ai.or").join(KINDS)))
 
 
 def warning(chosen: Service) -> str:
     """What a person reads before anything is sent."""
-    return (
-        f"Con --ia, el padrón se lee con {chosen.shown}, con tu clave:\n"
-        "- Van las imágenes de las páginas escaneadas o fotografiadas, con los nombres y los documentos de las\n"
-        "  personas. Las páginas de un PDF con texto no se mandan: se leen en tu computadora.\n"
-        "- Esa empresa los trata según sus condiciones: fijate si los usa para entrenar, cuánto tiempo los guarda y\n"
-        "  en qué país.\n"
-        "- El archivo .padron va a decir que una IA externa vio los datos. Según el nivel de seguridad de la\n"
-        "  elección, la app puede no aceptarlo."
-    )
+    return t("ai.warning", service=chosen.shown)
 
 
 def data_url(image: np.ndarray) -> str:
     """The page as a JPEG in a data URL: made again from its pixels, so nothing else in the file goes with it."""
     ok, encoded = cv2.imencode(".jpg", image, [cv2.IMWRITE_JPEG_QUALITY, JPEG_QUALITY])
     if not ok:
-        raise AIError("No se pudo armar la imagen de la página para mandarla.")
+        raise AIError(t("ai.image"))
     return "data:image/jpeg;base64," + base64.b64encode(encoded.tobytes()).decode("ascii")
 
 
@@ -515,22 +487,22 @@ def _retry_after(error: urllib.error.HTTPError, otherwise: float) -> float:
 def _mistral_page(answer: dict) -> AIPage:
     pages = answer.get("pages")
     if not isinstance(pages, list) or not pages:
-        raise _Malformed("no trae páginas")
+        raise _Malformed(t("answer.no_pages"))
     tables = []
     for page in pages:
         if not isinstance(page, dict) or not isinstance(page.get("markdown"), str):
-            raise _Malformed("una página no trae su texto")
+            raise _Malformed(t("answer.page_without_text"))
         markdown = page["markdown"]
         apart = page.get("tables") or []
         if not isinstance(apart, list):
-            raise _Malformed("las tablas de una página no son una lista")
+            raise _Malformed(t("answer.tables_not_list"))
         # A table the service gives apart is in the text as a link to it, such as [tbl-0.md](tbl-0.md).
         for table in apart:
             if isinstance(table, dict) and isinstance(table.get("id"), str) and isinstance(table.get("content"), str):
                 markdown = markdown.replace(f"[{table['id']}]({table['id']})", "\n" + table["content"] + "\n")
         tables += markdown_tables(markdown)
     if sum(len(table.rows) for table in tables) > MAX_ROWS:
-        raise _Malformed(f"trae más de {MAX_ROWS} renglones de tablas en una página")
+        raise _Malformed(t("answer.too_many_lines", count=MAX_ROWS))
     return AIPage(tables)
 
 
@@ -574,16 +546,16 @@ def _cells(line: str) -> list[str]:
 def _chat_page(answer: dict) -> AIPage:
     choices = answer.get("choices")
     if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
-        raise _Malformed("no trae una respuesta")
+        raise _Malformed(t("answer.no_answer"))
     message = choices[0].get("message")
     content = message.get("content") if isinstance(message, dict) else None
     if isinstance(content, list):
         texts = [part.get("text") for part in content if isinstance(part, dict)]
         content = "".join(text for text in texts if isinstance(text, str))
     if not isinstance(content, str) or not content.strip():
-        raise _Malformed("vino vacía")
+        raise _Malformed(t("answer.empty"))
     if choices[0].get("finish_reason") == "length":
-        raise _Malformed("se cortó antes de terminar")
+        raise _Malformed(t("answer.cut"))
     text = content.strip()
     fenced = re.fullmatch(r"```(?:json)?\s*(.*?)\s*```", text, flags=re.DOTALL)
     if fenced:
@@ -591,7 +563,7 @@ def _chat_page(answer: dict) -> AIPage:
     try:
         parsed = json.loads(text)
     except ValueError:
-        raise _Malformed("no es JSON") from None
+        raise _Malformed(t("answer.not_json")) from None
     return AIPage([answer_table(parsed)])
 
 
@@ -605,24 +577,24 @@ def answer_table(parsed) -> AITable:
     """
     rows = parsed.get("rows") if isinstance(parsed, dict) else None
     if not isinstance(rows, list):
-        raise _Malformed("falta la lista «rows»")
+        raise _Malformed(t("answer.no_rows"))
     # A page that lists nobody has no columns to check.
     named = parsed.get("columns", None if rows else [])
     if not isinstance(named, list) or not all(isinstance(name, str) for name in named):
-        raise _Malformed("falta la lista «columns»")
+        raise _Malformed(t("answer.no_columns"))
     if len(rows) > MAX_ROWS:
-        raise _Malformed(f"trae más de {MAX_ROWS} personas en una página")
+        raise _Malformed(t("answer.too_many_people", count=MAX_ROWS))
     people = []
     for row in rows:
         if not isinstance(row, dict):
-            raise _Malformed("una persona no es un objeto")
+            raise _Malformed(t("answer.person_not_object"))
         person = {}
         for asked, key in ANSWER_KEYS.items():
             value = row.get(asked)
             if value is None:
                 continue
             if isinstance(value, bool) or not isinstance(value, (str, int, float)):
-                raise _Malformed(f"«{asked}» no es texto ni número")
+                raise _Malformed(t("answer.not_text", field=asked))
             person[key] = str(value).strip()
         people.append(person)
     # Every roll has names: a person without one is reviewed. Any other value is checked only where the page has it.

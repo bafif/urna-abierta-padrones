@@ -7,6 +7,10 @@ from difflib import SequenceMatcher
 from pathlib import Path
 
 from .fields import DOCUMENT, FILE_NUMBER, file_number_adds_up, fold
+from .i18n import TEXTS
+
+# What verify finds is said in Spanish here, and the command line says it in the language of its messages.
+_SAYS = TEXTS["es"]
 
 
 def load_records(path: Path) -> list[dict]:
@@ -201,7 +205,7 @@ def _key_person(name: str | None) -> str:
     return " ".join(sorted(_key_name(name).split()))
 
 
-SAME_PERSON = "misma persona en más de una carrera"
+SAME_PERSON = _SAYS["check.same_person"]
 
 
 def _repeated(group: list[dict], other_name: str, by_file: bool) -> tuple[str, list[dict], bool]:
@@ -217,12 +221,12 @@ def _repeated(group: list[dict], other_name: str, by_file: bool) -> tuple[str, l
         return other_name, group, False
     if by_file and len({p["document"] for p in group if p["document"]}) > 1:
         # The same legajo and name with two documents: one of the documents is wrong.
-        return "legajo repetido con otro DNI", group, False
+        return _SAYS["check.file_number_other_document"], group, False
     keys = [_key_program(p.get("program")) for p in group]
     programs = Counter(keys)
     # Without a program, or with the same one, there is no telling the rows apart: the person was typed twice.
     twice = group if "" in programs else [p for p, key in zip(group, keys) if programs[key] > 1]
-    return "fila repetida", twice, len(programs.keys() - {""}) > 1
+    return _SAYS["check.repeated_row"], twice, len(programs.keys() - {""}) > 1
 
 
 def _reference_checks(reference: list[dict]) -> tuple[dict, dict[int, list[str]]]:
@@ -238,22 +242,22 @@ def _reference_checks(reference: list[dict]) -> tuple[dict, dict[int, list[str]]
     by_file: dict[str, list[dict]] = {}
     for person in reference:
         if not person["document"]:
-            note(person, "sin DNI")
+            note(person, _SAYS["check.no_document"])
         elif not DOCUMENT.match(person["document"]):
-            note(person, "el DNI no tiene 7 u 8 números")
+            note(person, _SAYS["check.bad_document"])
         else:
             by_document.setdefault(person["document"], []).append(person)
         if person["file_number"]:
             if not FILE_NUMBER.match(person["file_number"]):
-                note(person, "el legajo no tiene la forma A-1234/3")
+                note(person, _SAYS["check.bad_file_number"])
             elif not file_number_adds_up(person["file_number"]):
-                note(person, "el dígito del legajo no corresponde")
+                note(person, _SAYS["check.file_number_digit"])
             by_file.setdefault(person["file_number"], []).append(person)
     in_programs = 0
     counted: set[int] = set()  # rows already counted as one person in more than one program
     for groups, other_name in (
-        (by_document, "DNI repetido con otro nombre"),
-        (by_file, "legajo repetido con otro nombre"),
+        (by_document, _SAYS["check.document_other_name"]),
+        (by_file, _SAYS["check.file_number_other_name"]),
     ):
         for group in groups.values():
             if len(group) < 2:
@@ -318,7 +322,7 @@ def verify(records: list[dict], reference: list[dict]) -> tuple[dict, dict[int, 
             if sum(votes) >= 2 and (best_rank is None or rank > best_rank):
                 best, best_rank = record, rank
         if best is None:
-            rows.setdefault(person["row"], []).append("no está en la lectura")
+            rows.setdefault(person["row"], []).append(_SAYS["check.not_read"])
             continue
         matched += 1
         used.add(id(best))
@@ -327,19 +331,19 @@ def verify(records: list[dict], reference: list[dict]) -> tuple[dict, dict[int, 
         if _key_name_compact(best.get("name")) == name:
             same["name"] += 1
         else:
-            differs.append("nombre")
+            differs.append(_SAYS["field.name"])
         if person["document"]:
             compared["document"] += 1
             if best.get("document") == person["document"]:
                 same["document"] += 1
             else:
-                differs.append("DNI")
+                differs.append(_SAYS["field.document"])
         if person["file_number"] and best.get("file_number"):
             compared["file_number"] += 1
             if best["file_number"] == person["file_number"]:
                 same["file_number"] += 1
             else:
-                differs.append("legajo")
+                differs.append(_SAYS["field.file_number"])
         if best.get("needs_review"):
             flagged += 1
             flagged_differs += bool(differs)
@@ -348,7 +352,7 @@ def verify(records: list[dict], reference: list[dict]) -> tuple[dict, dict[int, 
             sure_differs += bool(differs)
             sure_by_field.update(differs)
         if differs:
-            rows.setdefault(person["row"], []).append("distinto de la lectura: " + ", ".join(differs))
+            rows.setdefault(person["row"], []).append(_SAYS["check.differs"].format(fields=", ".join(differs)))
     share = lambda n, d: round(n / d, 4) if d else None  # noqa: E731
     result = {
         "people_in_spreadsheet": len(reference),
