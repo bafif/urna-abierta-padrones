@@ -184,6 +184,9 @@ uv run urna-padrones crosscheck ~/privado/otro.jsonl ~/privado/padron.jsonl
 uv run urna-padrones verify ~/privado/padron.jsonl ~/privado/planilla.xlsx --filas
 ```
 
+- Habla en el idioma de la computadora: castellano si el sistema está en castellano, inglés si no. `--idioma es` o
+  `--idioma en` (también `--language`) lo fija, para los mensajes y para `--help`. Lo que escribe en los archivos no
+  cambia con el idioma.
 - `extract` toma un PDF o una imagen JPG, PNG o TIFF. Guarda los datos con permisos solo para tu usuario, y se niega a
   escribirlos dentro de un repo de git. En una terminal muestra por qué página va. `--pages N` lee solo las primeras N
   páginas y `--workers N`, cuántas a la vez. Al terminar dice cuántas filas leyó, cuántas páginas no tenían tabla y, si

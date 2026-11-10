@@ -182,6 +182,9 @@ uv run urna-padrones crosscheck ~/private/other.jsonl ~/private/roll.jsonl
 uv run urna-padrones verify ~/private/roll.jsonl ~/private/spreadsheet.xlsx --filas
 ```
 
+- It speaks the language of the computer: Spanish if the system is in Spanish, English otherwise. `--idioma es` or
+  `--idioma en` (also `--language`) sets it, for the messages and for `--help`. What it writes to its files does not
+  change with the language.
 - `extract` takes a PDF or a JPG, PNG or TIFF image. It saves the data with permissions for your user only, and refuses
   to write it inside a git repository. In a terminal it shows which page it is on. `--pages N` reads only the first N
   pages and `--workers N`, how many at a time. When it ends it says how many rows it read, how many pages had no table
