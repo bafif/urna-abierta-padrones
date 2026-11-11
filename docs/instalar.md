@@ -11,8 +11,9 @@ computadora de la [última versión](../../../releases/latest):
 | Mac con chip Apple (M1 o posterior), con macOS 14 o más nuevo | `urna-abierta-lector-macos-arm64.zip` |
 | Mac con procesador Intel, con macOS 14 o más nuevo | `urna-abierta-lector-macos-x64.zip` |
 | Linux de 64 bits con glibc 2.28 o más nueva | `urna-abierta-lector-linux-x64.tar.gz` |
+| Linux Alpine (y los otros Linux de 64 bits con musl) | `urna-abierta-lector-linux-x64-musl.tar.gz` |
 
-En Linux, glibc 2.28 quiere decir Ubuntu 20.04, Debian 10, Fedora 29 o más nuevos.
+En Linux, glibc 2.28 quiere decir Debian 10, Fedora 29, Arch, Ubuntu 20.04 o más nuevos.
 
 Para saber qué Mac tenés: menú Apple → «Acerca de esta Mac». Si dice «Chip» y un nombre como «Apple M1», es la de chip
 Apple; si dice «Procesador» y un nombre con «Intel», es la otra.
@@ -50,6 +51,8 @@ abrir la app de nuevo no abre otra pestaña. Lo que el lector escribe, con su di
 1. Descomprimí el archivo: `tar -xzf urna-abierta-lector-linux-x64.tar.gz`.
 2. Abrilo desde una terminal: `./urna-abierta-lector-linux-x64/urna-abierta-lector`. Muestra la dirección y abre el
    navegador. Se cierra al cerrar la terminal, con Ctrl+C o con «Cerrar el lector».
+
+En Alpine, el archivo y la carpeta terminan en `-musl`: `urna-abierta-lector-linux-x64-musl/urna-abierta-lector`.
 
 ## Comprobar el archivo
 

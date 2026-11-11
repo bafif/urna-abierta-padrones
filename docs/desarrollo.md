@@ -28,12 +28,12 @@ Están en `src/urna_padrones/lector/ui/`. El tema y sus letras son copias de la 
 ## Cómo se arma el lector
 
 Los archivos de cada versión los arma GitHub Actions (`.github/workflows/release.yml`) cuando se sube una etiqueta
-`v*`, cada uno en una máquina del sistema para el que es: Windows x64, macOS con chip Apple, macOS con Intel y Linux
-x64 (Ubuntu 22.04). Nunca se arman en una computadora personal, para que no lleven rutas ni nombres de nadie. Cada
-máquina arma el lector, corre su prueba propia sin red, comprueba que no se bajó nada y que la telemetría de
-onnxruntime quedó apagada, escribe el archivo con su SHA-256 y su constancia, y lo sube a la versión, que se publica
-cuando están los cuatro. El mismo flujo se puede correr a mano sobre `main`, desde «Actions», «Release», «Run
-workflow»: arma y prueba los cuatro igual, sin crear ni publicar ninguna versión.
+`v*`, cada uno en una máquina del sistema para el que es: Windows x64, macOS con chip Apple, macOS con Intel, Linux x64
+(Ubuntu 22.04) y Linux x64 con musl (un contenedor de Alpine 3.24). Nunca se arman en una computadora personal, para
+que no lleven rutas ni nombres de nadie. Cada máquina arma el lector, corre su prueba propia sin red, comprueba que no
+se bajó nada y que la telemetría de onnxruntime quedó apagada, escribe el archivo con su SHA-256 y su constancia, y lo
+sube a la versión, que se publica cuando están los cinco. El mismo flujo se puede correr a mano sobre `main`, desde
+«Actions», «Release», «Run workflow»: arma y prueba los cinco igual, sin crear ni publicar ninguna versión.
 
 Para armarlo para tu sistema, en tu computadora:
 
@@ -42,7 +42,15 @@ uv sync --managed-python --no-editable --group build
 uv run --no-sync python packaging/build.py --self-test --start-time --archive
 ```
 
-Queda en `dist/`. En Linux ocupa unos 340 MB descomprimido y 140 MB comprimido.
+Queda en `dist/`. En Linux ocupa unos 340 MB descomprimido y 140 MB comprimido; el de Alpine, unos 580 MB y 225 MB,
+porque su OpenCV viene de los paquetes de Alpine, que lo arman con todos sus módulos.
+
+Para Alpine, `packaging/alpine.sh` prepara el Python que lo arma, dentro de un contenedor:
+
+```sh
+podman run --rm -v "$PWD":/src -w /src docker.io/library/alpine:3.24 \
+  sh -c 'sh packaging/alpine.sh && /opt/lector/bin/python packaging/build.py --self-test --archive'
+```
 
 ## Decisiones
 
@@ -57,7 +65,10 @@ Queda en `dist/`. En Linux ocupa unos 340 MB descomprimido y 140 MB comprimido.
 - En las Mac con Intel, onnxruntime queda en 1.23.2, la última versión con paquetes para ellas (lo fija
   `pyproject.toml`). onnxruntime y OpenCV piden macOS 14 en los dos tipos de Mac; `build.py` falla si algo pide más.
 - En Linux no lleva el runtime de C++ de la máquina que lo arma, que pediría su glibc: usa el del sistema y pide glibc
-  2.28 o más nueva. `build.py` lo calcula en cada armado.
+  2.28 o más nueva. `build.py` lo calcula en cada armado. En Alpine sí lo lleva: un Alpine sin escritorio puede no
+  tenerlo.
+- PyPI no publica onnxruntime ni OpenCV para musl, ni pyclipper para el Python de Alpine: en Alpine, esos tres y numpy
+  vienen de sus paquetes, y lo demás, PyInstaller incluido, de las versiones de `uv.lock`.
 - `THIRD_PARTY_NOTICES.txt` y la carpeta `licenses/` se generan en cada armado con lo que de verdad entró
   (`packaging/notices.py`), con los textos de licencia que trae cada paquete. También nombran las bibliotecas que
   Python lleva adentro (OpenSSL, SQLite, zlib y otras), cuyos textos están en `LICENSES/python/`.

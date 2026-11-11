@@ -35,6 +35,7 @@ The reader comes ready for each system: there is no need to install Python or an
 | Mac with an Apple chip (M1 or later), on macOS 14 or newer | `urna-abierta-lector-macos-arm64.zip` |
 | Mac with an Intel processor, on macOS 14 or newer | `urna-abierta-lector-macos-x64.zip` |
 | 64-bit Linux with glibc 2.28 or newer | `urna-abierta-lector-linux-x64.tar.gz` |
+| Alpine Linux (and the other 64-bit Linux with musl) | `urna-abierta-lector-linux-x64-musl.tar.gz` |
 
 The program is not signed with a paid certificate: the first time, Windows and macOS warn that they do not know it.
 How to open it on each system, and how to check that the file is the one GitHub built, is in
@@ -56,8 +57,8 @@ The terminal commands are in [Usage](docs/usage.md#from-the-terminal).
 
 - **It reads** rolls laid out as tables, in scanned PDFs, PDFs with text and JPG, PNG or TIFF photos, with polling
   tables and addresses. It does not read handwriting yet, nor tables without ruling and without a header it knows.
-- **The reader** is built and checked offline on GitHub's machines, for Windows, macOS and Linux. It has not been
-  tried yet on computers running Windows or macOS.
+- **The reader** is built and checked offline on GitHub's machines, for Windows, macOS, Linux and Alpine. It has not
+  been tried yet on computers running Windows or macOS.
 - **With your own AI**, a roll can be read only from the terminal, and this has only been tried against a fake
   service. The reader does not offer a free AI service yet.
 

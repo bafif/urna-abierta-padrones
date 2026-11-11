@@ -11,8 +11,9 @@ Download the file for your computer from the [latest release](../../../releases/
 | Mac with an Apple chip (M1 or later), on macOS 14 or newer | `urna-abierta-lector-macos-arm64.zip` |
 | Mac with an Intel processor, on macOS 14 or newer | `urna-abierta-lector-macos-x64.zip` |
 | 64-bit Linux with glibc 2.28 or newer | `urna-abierta-lector-linux-x64.tar.gz` |
+| Alpine Linux (and the other 64-bit Linux with musl) | `urna-abierta-lector-linux-x64-musl.tar.gz` |
 
-On Linux, glibc 2.28 means Ubuntu 20.04, Debian 10, Fedora 29 or newer.
+On Linux, glibc 2.28 means Debian 10, Fedora 29, Arch, Ubuntu 20.04 or newer.
 
 To know which Mac you have: Apple menu → "About This Mac". If it says "Chip" and a name like "Apple M1", it has an
 Apple chip; if it says "Processor" and a name with "Intel", it is the other one.
@@ -50,6 +51,8 @@ the app again does not open another tab. What the reader writes, its address inc
 1. Unpack the file: `tar -xzf urna-abierta-lector-linux-x64.tar.gz`.
 2. Start it from a terminal: `./urna-abierta-lector-linux-x64/urna-abierta-lector`. It shows the address and opens the
    browser. It closes when you close the terminal, with Ctrl+C or with "Close the reader".
+
+On Alpine, the file and the folder end in `-musl`: `urna-abierta-lector-linux-x64-musl/urna-abierta-lector`.
 
 ## Check the file
 

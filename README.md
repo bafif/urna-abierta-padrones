@@ -34,6 +34,7 @@ El lector viene armado para cada sistema: no hace falta instalar Python ni nada 
 | Mac con chip Apple (M1 o posterior), con macOS 14 o más nuevo | `urna-abierta-lector-macos-arm64.zip` |
 | Mac con procesador Intel, con macOS 14 o más nuevo | `urna-abierta-lector-macos-x64.zip` |
 | Linux de 64 bits con glibc 2.28 o más nueva | `urna-abierta-lector-linux-x64.tar.gz` |
+| Linux Alpine (y los otros Linux de 64 bits con musl) | `urna-abierta-lector-linux-x64-musl.tar.gz` |
 
 El programa no está firmado con un certificado pago: la primera vez, Windows y macOS avisan que no lo conocen. Cómo
 abrirlo en cada sistema y cómo comprobar que el archivo es el que armó GitHub, en [Instalar](docs/instalar.md).
@@ -54,8 +55,8 @@ de la terminal están en [Cómo se usa](docs/uso.md#desde-la-terminal).
 
 - **Lee** padrones hechos como tabla, en PDF escaneados, PDF con texto y fotos JPG, PNG o TIFF, con mesas y
   domicilios. Todavía no lee letra manuscrita ni tablas sin líneas y sin un encabezado que reconozca.
-- **El lector** se arma y se prueba sin red en las máquinas de GitHub, para Windows, macOS y Linux. En computadoras
-  con Windows o macOS todavía no se probó.
+- **El lector** se arma y se prueba sin red en las máquinas de GitHub, para Windows, macOS, Linux y Alpine. En
+  computadoras con Windows o macOS todavía no se probó.
 - **Con tu propia IA** se lee solo desde la terminal, y solo se probó contra un servicio falso. El lector todavía no
   ofrece un servicio de IA gratis.
 

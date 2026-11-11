@@ -5,7 +5,7 @@ name: Release
 on:
   push:
     tags: ['v*']
-  # By hand, on main: builds and checks the four exactly as a version would, and publishes nothing. The reader has never
+  # By hand, on main: builds and checks the five exactly as a version would, and publishes nothing. The reader has never
   # been built before its first tag; this way a failure shows up before tagging.
   workflow_dispatch:
 
@@ -37,8 +37,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Windows x64, Apple Silicon, Intel Macs and Linux x64. Linux is built on the oldest Ubuntu
-        # still offered; the bundle leaves out its C++ runtime and needs glibc 2.28 (build.py says it).
+        # Windows x64, Apple Silicon, Intel Macs and Linux x64 with glibc. Linux is built on the oldest
+        # machine GitHub offers; the bundle leaves out its C++ runtime and needs glibc 2.28 (build.py says it).
+        # Linux with musl (Alpine) is the lector-musl job.
         os: [windows-2025, macos-15, macos-15-intel, ubuntu-22.04]
     runs-on: ${{ matrix.os }}
     env:
@@ -120,8 +121,45 @@ jobs:
           SUMS: ${{ steps.archive.outputs.sums }}
         run: gh release upload "$GITHUB_REF_NAME" "$ARCHIVE" "$SUMS"
 
+  # The reader for Alpine and the other Linux with musl (urna-abierta-lector-linux-x64-musl), built and checked inside
+  # Alpine 3.24; packaging/alpine.sh says which pieces come from Alpine's packages and why. Only this job runs in a
+  # container. A container cannot open a network namespace of its own: the self test relies on build.py pointing every
+  # proxy at a dead port and failing if anything in the bundle changed.
+  lector-musl:
+    needs: draft
+    runs-on: ubuntu-24.04
+    container: alpine:3.24
+    env:
+      URNA_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || '0.0.0' }}
+      URNA_SOURCE_URL: ${{ github.server_url }}/${{ github.repository }}/tree/${{ github.ref_type == 'tag' && github.ref_name || github.sha }}
+    steps:
+      - run: apk add --no-cache git github-cli
+      - uses: actions/checkout@v4
+      # The time of the last commit dates the archive: git has to accept the runner's checkout.
+      - run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - run: sh packaging/alpine.sh
+      - name: Build
+        run: /opt/lector/bin/python packaging/build.py
+      - name: Self test without network
+        run: /opt/lector/bin/python packaging/build.py --no-build --self-test
+      - name: Start time
+        run: /opt/lector/bin/python packaging/build.py --no-build --start-time
+      - id: archive
+        name: Archive
+        run: /opt/lector/bin/python packaging/build.py --no-build --archive
+      - if: github.event_name == 'push'
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: ${{ steps.archive.outputs.archive }}
+      - name: Add it to the release
+        if: github.event_name == 'push'
+        env:
+          ARCHIVE: ${{ steps.archive.outputs.archive }}
+          SUMS: ${{ steps.archive.outputs.sums }}
+        run: gh release upload "$GITHUB_REF_NAME" "$ARCHIVE" "$SUMS"
+
   publish:
-    needs: lector
+    needs: [lector, lector-musl]
     if: github.event_name == 'push'
     runs-on: ubuntu-24.04
     steps:

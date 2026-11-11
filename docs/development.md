@@ -28,12 +28,13 @@ They are in `src/urna_padrones/lector/ui/`. The theme and its fonts are copies f
 ## How the reader is built
 
 The files of each release are built by GitHub Actions (`.github/workflows/release.yml`) when a `v*` tag is pushed, each
-one on a machine of the system it is for: Windows x64, macOS with an Apple chip, macOS with Intel and Linux x64 (Ubuntu
-22.04). They are never built on a personal computer, so they carry nobody's paths or names. Each machine builds the
-reader, runs its own check without network, makes sure nothing was downloaded and that onnxruntime's telemetry stayed
-off, writes the file with its SHA-256 and its attestation, and uploads it to the release, which is published once all
-four are there. The same workflow can be run by hand on `main`, from “Actions”, “Release”, “Run workflow”: it builds
-and checks the four the same way, without creating or publishing any release.
+one on a machine of the system it is for: Windows x64, macOS with an Apple chip, macOS with Intel, Linux x64 (Ubuntu
+22.04) and Linux x64 with musl (an Alpine 3.24 container). They are never built on a personal computer, so they carry
+nobody's paths or names. Each machine builds the reader, runs its own check without network, makes sure nothing was
+downloaded and that onnxruntime's telemetry stayed off, writes the file with its SHA-256 and its attestation, and
+uploads it to the release, which is published once all five are there. The same workflow can be run by hand on `main`,
+from “Actions”, “Release”, “Run workflow”: it builds and checks the five the same way, without creating or publishing
+any release.
 
 To build it for your system, on your computer:
 
@@ -42,7 +43,15 @@ uv sync --managed-python --no-editable --group build
 uv run --no-sync python packaging/build.py --self-test --start-time --archive
 ```
 
-It ends up in `dist/`. On Linux it takes about 340 MB unpacked and 140 MB compressed.
+It ends up in `dist/`. On Linux it takes about 340 MB unpacked and 140 MB compressed; the Alpine one, about 580 MB and
+225 MB, because its OpenCV comes from Alpine's packages, which build it with every module.
+
+For Alpine, `packaging/alpine.sh` prepares the Python that builds it, inside a container:
+
+```sh
+podman run --rm -v "$PWD":/src -w /src docker.io/library/alpine:3.24 \
+  sh -c 'sh packaging/alpine.sh && /opt/lector/bin/python packaging/build.py --self-test --archive'
+```
 
 ## Decisions
 
@@ -57,7 +66,10 @@ It ends up in `dist/`. On Linux it takes about 340 MB unpacked and 140 MB compre
 - On Intel Macs onnxruntime stays at 1.23.2, the last release with packages for them (`pyproject.toml` pins it).
   onnxruntime and OpenCV need macOS 14 on both kinds of Mac; `build.py` fails if anything asks for more.
 - On Linux it leaves out the C++ runtime of the machine that builds it, which would ask for that machine's glibc: it
-  uses the system's and needs glibc 2.28 or newer. `build.py` works it out on every build.
+  uses the system's and needs glibc 2.28 or newer. `build.py` works it out on every build. On Alpine it does carry it:
+  an Alpine without a desktop may not have one.
+- PyPI publishes no onnxruntime and no OpenCV for musl, nor pyclipper for Alpine's Python: on Alpine those three and
+  numpy come from its packages, and everything else, PyInstaller included, at the versions in `uv.lock`.
 - `THIRD_PARTY_NOTICES.txt` and the `licenses/` folder are generated on every build from what actually went in
   (`packaging/notices.py`), with the license texts each package carries. They also name the libraries Python carries
   inside it (OpenSSL, SQLite, zlib and others), whose texts are in `LICENSES/python/`.
