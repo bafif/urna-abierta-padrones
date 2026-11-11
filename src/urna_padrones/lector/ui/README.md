@@ -2,9 +2,7 @@
 
 [English](README.en.md)
 
-`index.html`, `lector.js` y `lector.css` son propios del lector. Siguen el instalador de Urna Abierta
-(`apps/installer/ui/` en el repo de la app): una pregunta por pantalla, el riel de pasos a la izquierda y el
-mismo tema.
+`index.html`, `lector.js` y `lector.css` son propios del lector.
 
 Estos archivos son copias de la app y no se editan acá:
 
