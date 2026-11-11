@@ -285,12 +285,13 @@ if they cannot find it.
 
 ## How the reader is built
 
-The files of each release are built by GitHub Actions (`.github/workflows/release.yml`) when a `v*` tag is pushed,
-each one on a machine of the system it is for: Windows x64, macOS with an Apple chip, macOS with Intel and Linux x64
-(Ubuntu 22.04). They are never built on a personal computer, so they carry nobody's paths or names. Each machine builds
-the reader, runs its own check without network, makes sure nothing was downloaded and that onnxruntime's telemetry
-stayed off, writes the file with its SHA-256 and its attestation, and uploads it to the release, which is published
-once all four are there.
+The files of each release are built by GitHub Actions (`.github/workflows/release.yml`) when a `v*` tag is pushed, each
+one on a machine of the system it is for: Windows x64, macOS with an Apple chip, macOS with Intel and Linux x64 (Ubuntu
+22.04). They are never built on a personal computer, so they carry nobody's paths or names. Each machine builds the
+reader, runs its own check without network, makes sure nothing was downloaded and that onnxruntime's telemetry stayed
+off, writes the file with its SHA-256 and its attestation, and uploads it to the release, which is published once all
+four are there. Before the tag, the same workflow can be run by hand on `main`, from “Actions”, “Release”, “Run
+workflow”: it builds and checks the four the same way, without creating or publishing any release.
 
 To build it for your system, on your computer:
 

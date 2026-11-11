@@ -289,7 +289,8 @@ cada uno en una máquina del sistema para el que es: Windows x64, macOS con chip
 (Ubuntu 22.04). Nunca se arman en una computadora personal, para que no lleven rutas ni nombres de nadie. Cada máquina
 arma el lector, corre su prueba propia sin red, comprueba que no se bajó nada y que la telemetría de onnxruntime quedó
 apagada, escribe el archivo con su SHA-256 y su constancia, y lo sube a la versión, que se publica cuando están los
-cuatro.
+cuatro. Antes de la etiqueta, el mismo flujo se puede correr a mano sobre `main`, desde «Actions», «Release», «Run
+workflow»: arma y prueba los cuatro igual, sin crear ni publicar ninguna versión.
 
 Para armarlo para tu sistema, en tu computadora:
 

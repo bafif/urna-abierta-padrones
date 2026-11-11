@@ -5,6 +5,9 @@ name: Release
 on:
   push:
     tags: ['v*']
+  # By hand, on main: builds and checks the four exactly as a version would, and publishes nothing. The reader has never
+  # been built before its first tag; this way a failure shows up before tagging.
+  workflow_dispatch:
 
 permissions:
   contents: write
@@ -24,7 +27,8 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - run: |
+      - if: github.event_name == 'push'
+        run: |
           sed -e "s/{tag}/$GITHUB_REF_NAME/g" -e "s#{repo}#$GITHUB_REPOSITORY#g" .github/release-notes.md > "$RUNNER_TEMP/notes.md"
           gh release create "$GITHUB_REF_NAME" --draft --generate-notes --notes-file "$RUNNER_TEMP/notes.md"
 
@@ -38,8 +42,8 @@ jobs:
         os: [windows-2025, macos-15, macos-15-intel, ubuntu-22.04]
     runs-on: ${{ matrix.os }}
     env:
-      URNA_VERSION: ${{ github.ref_name }}
-      URNA_SOURCE_URL: ${{ github.server_url }}/${{ github.repository }}/tree/${{ github.ref_name }}
+      URNA_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || '0.0.0' }}
+      URNA_SOURCE_URL: ${{ github.server_url }}/${{ github.repository }}/tree/${{ github.ref_type == 'tag' && github.ref_name || github.sha }}
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
@@ -104,10 +108,12 @@ jobs:
       - id: archive
         name: Archive
         run: uv run --no-sync python packaging/build.py --no-build --archive
-      - uses: actions/attest-build-provenance@v2
+      - if: github.event_name == 'push'
+        uses: actions/attest-build-provenance@v2
         with:
           subject-path: ${{ steps.archive.outputs.archive }}
       - name: Add it to the release
+        if: github.event_name == 'push'
         shell: bash
         env:
           ARCHIVE: ${{ steps.archive.outputs.archive }}
@@ -116,6 +122,7 @@ jobs:
 
   publish:
     needs: lector
+    if: github.event_name == 'push'
     runs-on: ubuntu-24.04
     steps:
       - run: gh release edit "$GITHUB_REF_NAME" --draft=false
