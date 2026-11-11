@@ -4,6 +4,8 @@
     uv run --no-sync python packaging/build.py            # dist/urna-abierta-lector-<os>-<arch>/
     uv run --no-sync python packaging/build.py --self-test --archive
 
+For Alpine and the other Linux with musl, the Python that builds it is prepared by packaging/alpine.sh.
+
 --self-test runs the built program's own check with every proxy pointing at a dead port and an
 empty temp folder of its own. It fails if anything in the bundle changed (a downloaded model would
 land there) or if onnxruntime's telemetry left its .ses file in that folder. --start-time
@@ -46,11 +48,16 @@ TELEMETRY_FILE = ".ses"
 MACOS_MINIMUM = (14, 0)
 
 
+def musl() -> bool:
+    """Alpine and the other Linux with musl instead of glibc (packaging/alpine.sh builds there)."""
+    return sys.platform.startswith("linux") and any(Path("/lib").glob("ld-musl-*.so.1"))
+
+
 def system() -> tuple[str, str]:
     name = {"win32": "windows", "darwin": "macos"}.get(sys.platform, sys.platform)
     machine = platform.machine().lower()
     arch = {"x86_64": "x64", "amd64": "x64", "aarch64": "arm64", "arm64": "arm64"}.get(machine, machine)
-    return name, arch
+    return name, arch + ("-musl" if musl() else "")
 
 
 def bundle_name() -> str:
@@ -121,7 +128,7 @@ def check() -> None:
         raise SystemExit("The bundle is not right:\n  " + "\n  ".join(problems))
     size = sum(files.values())
     print(f"bundle: {bundle_folder().name}, {len(files)} files, {size / 1e6:.1f} MB unpacked")
-    if sys.platform.startswith("linux") and shutil.which("readelf"):
+    if sys.platform.startswith("linux") and not musl() and shutil.which("readelf"):
         print(f"bundle: needs glibc {glibc_floor(bundle_folder())} or newer")
     if sys.platform == "darwin":
         floor = macos_floor(bundle_folder())

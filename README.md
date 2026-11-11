@@ -109,7 +109,8 @@ archivo de tu computadora de la [última versión](../../releases/latest):
 | Windows 10 u 11 | `urna-abierta-lector-windows-x64.zip` |
 | Mac con chip Apple (M1 o posterior), con macOS 14 o más nuevo | `urna-abierta-lector-macos-arm64.zip` |
 | Mac con procesador Intel, con macOS 14 o más nuevo | `urna-abierta-lector-macos-x64.zip` |
-| Linux de 64 bits con glibc 2.28 o más nueva (Ubuntu 20.04, Debian 10, Fedora 29 o más nuevos) | `urna-abierta-lector-linux-x64.tar.gz` |
+| Linux de 64 bits con glibc 2.28 o más nueva (Debian 10, Fedora 29, Arch, Ubuntu 20.04 o más nuevos) | `urna-abierta-lector-linux-x64.tar.gz` |
+| Linux Alpine (y los otros Linux de 64 bits con musl) | `urna-abierta-lector-linux-x64-musl.tar.gz` |
 
 Si la [página de versiones](../../releases) todavía no tiene ninguna, abrí el lector desde una terminal: con
 [uv](https://docs.astral.sh/uv/) instalado, en una copia de este repo (en GitHub, «Code» → «Download ZIP»), corré
@@ -331,7 +332,8 @@ Queda en `dist/`. Algunas decisiones:
   pero todavía no se comprobó. Los `.zip` de macOS no salen iguales: `ditto` guarda la hora en que se armó cada
   archivo.
 
-En Linux ocupa unos 340 MB descomprimido y 140 MB comprimido.
+En Linux ocupa unos 340 MB descomprimido y 140 MB comprimido. El de Alpine, unos 580 MB y 225 MB: su OpenCV viene de los paquetes de Alpine
+(`packaging/alpine.sh` dice por qué), que lo arman con todos sus módulos.
 
 ## Licencia
 

@@ -108,7 +108,8 @@ Download the file for your computer from the [latest release](../../releases/lat
 | Windows 10 or 11 | `urna-abierta-lector-windows-x64.zip` |
 | Mac with an Apple chip (M1 or later), on macOS 14 or newer | `urna-abierta-lector-macos-arm64.zip` |
 | Mac with an Intel processor, on macOS 14 or newer | `urna-abierta-lector-macos-x64.zip` |
-| 64-bit Linux with glibc 2.28 or newer (Ubuntu 20.04, Debian 10, Fedora 29 or newer) | `urna-abierta-lector-linux-x64.tar.gz` |
+| 64-bit Linux with glibc 2.28 or newer (Debian 10, Fedora 29, Arch, Ubuntu 20.04 or newer) | `urna-abierta-lector-linux-x64.tar.gz` |
+| Alpine Linux (and the other 64-bit Linux with musl) | `urna-abierta-lector-linux-x64-musl.tar.gz` |
 
 If the [releases page](../../releases) has no release yet, open the reader from a terminal: with
 [uv](https://docs.astral.sh/uv/) installed, in a copy of this repository (on GitHub, "Code" → "Download ZIP"), run
@@ -332,7 +333,8 @@ It ends up in `dist/`. Some decisions:
   dates too, but has not been checked yet. The macOS `.zip` files do not come out the same: `ditto` keeps the time each
   file was built.
 
-On Linux it takes about 340 MB unpacked and 140 MB compressed.
+On Linux it takes about 340 MB unpacked and 140 MB compressed. The Alpine one, about 580 MB and 225 MB: its OpenCV comes from Alpine's packages
+(`packaging/alpine.sh` says why), which build it with every module.
 
 ## License
 

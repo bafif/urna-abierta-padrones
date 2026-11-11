@@ -11,7 +11,7 @@ HERE = Path(SPECPATH)
 ROOT = HERE.parent
 sys.path.insert(0, str(HERE))
 import notices  # noqa: E402
-from build import MACOS_MINIMUM  # noqa: E402
+from build import MACOS_MINIMUM, musl  # noqa: E402
 
 from urna_padrones.ocr import BUNDLED_MODEL, bundled_model  # noqa: E402
 
@@ -61,7 +61,8 @@ a = Analysis(
 
 # OpenCV loads FFmpeg on Windows as a separate video plugin, which reading pages never needs.
 left_out = ("opencv_videoio_ffmpeg",)
-if sys.platform.startswith("linux"):
+if sys.platform.startswith("linux") and not musl():
+    # On Alpine (musl) it stays in the bundle: an Alpine without a desktop may not have it.
     # The C++ runtime of the build machine would ask for its glibc (2.35 on Ubuntu 22.04). Every
     # Linux with a desktop has one, and the wheels only need what glibc 2.28 systems have.
     left_out += ("libstdc++.so", "libgcc_s.so")
